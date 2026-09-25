@@ -19,8 +19,7 @@ export function drawReveal(canvas: HTMLCanvasElement, shot: Shot, chosen: Candid
   // Rail and cloth.
   g.fillStyle = '#5a3320';
   g.fillRect(ox - (format.length / 2 + margin) * s, oy - (format.width / 2 + margin) * s, (format.length + 2 * margin) * s, (format.width + 2 * margin) * s);
-  g.fillStyle = '#1d6b47';
-  g.fillRect(ox - (format.length / 2) * s, oy - (format.width / 2) * s, format.length * s, format.width * s);
+  // Pockets before the cloth, so the cloth covers the part of each circle inside the nose line.
   g.fillStyle = '#050505';
   for (const p of pockets) {
     const [x, y] = px(p.hole);
@@ -28,6 +27,8 @@ export function drawReveal(canvas: HTMLCanvasElement, shot: Shot, chosen: Candid
     g.arc(x, y, p.holeR * s, 0, Math.PI * 2);
     g.fill();
   }
+  g.fillStyle = '#1d6b47';
+  g.fillRect(ox - (format.length / 2) * s, oy - (format.width / 2) * s, format.length * s, format.width * s);
 
   const line = (a: V2, b: V2, colour: string, dash: number[] = [], w = 2) => {
     g.strokeStyle = colour;

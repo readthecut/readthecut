@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { type Candidate, type Shot, type Table, type V2 } from './geometry';
+import { type Candidate, type Pocket, type Shot, type Table, type V2 } from './geometry';
 
 // Heights are metres above the cloth.
 const CUSHION_H = 0.038;
@@ -59,6 +59,27 @@ function railInnerOutline(table: Table): V2[] {
     pts.push({ x: dx * r, z: dz * r });
   }
   return pts;
+}
+
+/**
+ * Clipping that keeps pocket meshes out of the table. The pocket circles overlap
+ * the cloth and cushions, so unclipped they would stand up out of the table.
+ * `inset` moves the boundary outward from the cushion nose: 0 for the pocket
+ * floor, CUSHION_W for the wall and ring, which belong to the rail.
+ */
+function pocketClip(table: Table, p: Pocket, inset: number): { planes: THREE.Plane[]; intersection: boolean } {
+  const sx = Math.sign(p.mouth.x);
+  const sz = Math.sign(p.mouth.z);
+  const beyondSide = new THREE.Plane(new THREE.Vector3(0, 0, sz), -(table.halfW + inset));
+  if (p.kind === 'side') return { planes: [beyondSide], intersection: false };
+  // A corner clips only the quadrant inside both boundaries.
+  return { planes: [new THREE.Plane(new THREE.Vector3(sx, 0, 0), -(table.halfL + inset)), beyondSide], intersection: true };
+}
+
+function applyClip(material: THREE.Material, clip: ReturnType<typeof pocketClip>) {
+  material.clippingPlanes = clip.planes;
+  material.clipIntersection = clip.intersection;
+  material.needsUpdate = true;
 }
 
 function ballTexture(n: number, style: Table['format']['balls']): THREE.CanvasTexture {
@@ -145,6 +166,7 @@ export class TableScene {
   constructor() {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     this.renderer.shadowMap.enabled = true;
+    this.renderer.localClippingEnabled = true; // pocket meshes are clipped to outside the playing surface
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
@@ -207,16 +229,23 @@ export class TableScene {
     // Pockets: a black floor just above the cloth plus a wall down from the rail.
     for (const p of pockets) {
       const r = p.holeR;
-      const floor = new THREE.Mesh(layFlat(new THREE.CircleGeometry(r, 40), 0.0008), black);
+      const floorBlack = black.clone();
+      applyClip(floorBlack, pocketClip(table, p, 0));
+      const floor = new THREE.Mesh(layFlat(new THREE.CircleGeometry(r, 40), 0.0008), floorBlack);
       floor.position.set(p.hole.x, 0, p.hole.z);
       group.add(floor);
-      const wall = new THREE.Mesh(new THREE.CylinderGeometry(r, r, RAIL_H, 40, 1, true), black);
+      const wallBlack = black.clone();
+      applyClip(wallBlack, pocketClip(table, p, CUSHION_W));
+      const wall = new THREE.Mesh(new THREE.CylinderGeometry(r, r, RAIL_H, 40, 1, true), wallBlack);
       wall.position.set(p.hole.x, RAIL_H / 2, p.hole.z);
       group.add(wall);
     }
 
     // Cushions: one prism per rail segment, running between the jaws.
-    const segments: [V2, V2, V2][] = []; // start jaw, end jaw, outward normal
+    // Facings angle back into the pocket: sharply at corners (WPA 142°), barely at sides (104°).
+    const CORNER_FLARE = CUSHION_W * 0.7;
+    const SIDE_FLARE = CUSHION_W * Math.tan((14 * Math.PI) / 180);
+    const segments: [V2, V2, V2, number][] = []; // start jaw, end jaw, outward normal, flare at the end jaw
     const corner = pockets.filter((p) => p.kind === 'corner');
     const side = pockets.filter((p) => p.kind === 'side');
     const jawOnLong = (p: Table['pockets'][number]) => p.jaws.find((j) => Math.abs(Math.abs(j.z) - halfW) < 1e-9)!;
@@ -226,20 +255,20 @@ export class TableScene {
       for (const sx of [-1, 1]) {
         const c = corner.find((p) => Math.sign(p.mouth.x) === sx && Math.sign(p.mouth.z) === sz)!;
         const sj = sidePocket.jaws.find((j) => Math.sign(j.x) === sx)!;
-        segments.push([jawOnLong(c), sj, { x: 0, z: sz }]);
+        segments.push([jawOnLong(c), sj, { x: 0, z: sz }, SIDE_FLARE]);
       }
     }
     for (const sx of [-1, 1]) {
       const [a, b] = corner.filter((p) => Math.sign(p.mouth.x) === sx);
-      segments.push([jawOnShort(a), jawOnShort(b), { x: sx, z: 0 }]);
+      segments.push([jawOnShort(a), jawOnShort(b), { x: sx, z: 0 }, CORNER_FLARE]);
     }
-    for (const [a, b, n] of segments) {
+    for (const [a, b, n, endFlare] of segments) {
       const along = { x: b.x - a.x, z: b.z - a.z };
       const l = Math.hypot(along.x, along.z);
       const t = { x: along.x / l, z: along.z / l };
-      const flare = CUSHION_W * 0.7; // facings angle back into the pocket
       const back = (p: V2, s: number) => ({ x: p.x + n.x * CUSHION_W + t.x * s, z: p.z + n.z * CUSHION_W + t.z * s });
-      const shape = flatShape([a, b, back(b, flare), back(a, -flare)]);
+      // Every segment starts at a corner jaw.
+      const shape = flatShape([a, b, back(b, endFlare), back(a, -CORNER_FLARE)]);
       const geo = new THREE.ExtrudeGeometry(shape, { depth: CUSHION_H, bevelEnabled: false });
       const mesh = new THREE.Mesh(layFlat(geo, 0), cushionCloth);
       mesh.receiveShadow = true;
@@ -315,6 +344,7 @@ export class TableScene {
     this.objectBall.position.set(shot.object.x, objectR, shot.object.z);
     this.pocketMarker.position.set(shot.pocket.hole.x, RAIL_H + 0.001, shot.pocket.hole.z);
     this.pocketMarker.scale.setScalar(shot.pocket.holeR + 0.004);
+    applyClip(this.pocketMarker.material as THREE.Material, pocketClip(shot.table, shot.pocket, CUSHION_W));
     this.objectBall.rotation.set(...shot.objectSpin);
     const mat = this.objectBall.material as THREE.MeshStandardMaterial;
     mat.map?.dispose();
