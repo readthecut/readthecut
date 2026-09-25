@@ -194,7 +194,7 @@ canvas,
   gap: 10px;
 }
 .choice {
-  cursor: pointer;
+  cursor: zoom-in;
   border-radius: calc(var(--radius) + 3px);
   outline: 3px solid transparent;
   outline-offset: 0;
@@ -293,6 +293,45 @@ canvas,
 }
 .lightbox canvas {
   border-radius: var(--radius);
+}
+.lightbox.expanded {
+  cursor: default;
+  align-content: center;
+  gap: 12px;
+}
+.lb-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+}
+.lb-tabs {
+  display: flex;
+  gap: 4px;
+}
+.lb-tabs button,
+.lb-step {
+  min-width: 44px;
+  padding: 0.55em 0.8em;
+  font-weight: 700;
+}
+.lb-tabs button[aria-current='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.lb-tabs button.is-correct {
+  border-color: var(--good);
+}
+.lb-tabs button.is-wrong {
+  border-color: var(--bad);
+}
+.prompt span {
+  color: var(--muted);
+  font-weight: 400;
+}
+.choice .zoom {
+  pointer-events: none;
 }
 
 @media (min-width: 960px) {

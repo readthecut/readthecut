@@ -68,6 +68,9 @@ interface View {
   render: (c: HTMLCanvasElement) => void;
 }
 let views: View[] = [];
+let choiceViews: View[] = [];
+/** Controls for the open expanded Aim View, so the keyboard can drive it. */
+let expanded: { show: (j: number) => void; step: (d: number) => void; choose: () => void; close: () => void } | null = null;
 
 const MAX_RENDER_WIDTH = 3200;
 
@@ -294,7 +297,7 @@ function nextShot() {
       <p class="caption">Standing View. The ringed pocket is the one you're playing.</p>
     </section>
     <section class="answer">
-      <p class="prompt">Which Aim View pockets the ball?</p>
+      <p class="prompt">Which Aim View pockets the ball? <span>Tap a view to see it large.</span></p>
       <div class="choices"></div>
       <button class="primary lock" disabled>Lock in</button>
       <div class="reveal" hidden></div>
@@ -308,10 +311,10 @@ function nextShot() {
   // Build the cards first so every canvas has its laid-out size before rendering.
   const grid = view.querySelector('.choices')!;
   const cards = shot.choices.map((_, i) => {
-    const card = h(`<figure class="choice" tabindex="0" role="button" aria-label="Choice ${LETTERS[i]}">
+    const card = h(`<figure class="choice" tabindex="0" role="button" aria-label="Enlarge Choice ${LETTERS[i]}">
       <canvas width="${AIM_ASPECT * 300}" height="300"></canvas>
       <figcaption>${LETTERS[i]}</figcaption>
-      <button class="zoom" aria-label="Enlarge Choice ${LETTERS[i]}">⤢</button>
+      <span class="zoom" aria-hidden="true">⤢</span>
     </figure>`);
     grid.append(card);
     return card;
@@ -322,12 +325,10 @@ function nextShot() {
   const standing = addView(view.querySelector<HTMLCanvasElement>('.standing canvas')!, STANDING_ASPECT, (c) => table.renderStanding(c));
   view.querySelector('.standing .zoom')!.addEventListener('click', () => zoom(standing));
 
-  cards.forEach((card, i) => {
+  choiceViews = cards.map((card, i) => {
     const aim = addView(card.querySelector('canvas')!, AIM_ASPECT, (c) => table.renderAim(c, shot.choices[i]));
-    card.addEventListener('click', (e) => {
-      if ((e.target as HTMLElement).closest('.zoom')) return zoom(aim);
-      select(i);
-    });
+    card.addEventListener('click', () => expandChoice(i));
+    return aim;
   });
   view.querySelector('.lock')!.addEventListener('click', lockIn);
   shownAt = performance.now();
@@ -413,6 +414,19 @@ function lockIn() {
 }
 
 function onKey(e: KeyboardEvent) {
+  if (expanded) {
+    const k = e.key.toLowerCase();
+    const idx = ['1', '2', '3', '4'].indexOf(k) >= 0 ? Number(k) - 1 : ['a', 'b', 'c', 'd'].indexOf(k);
+    if (e.key === 'Escape') expanded.close();
+    else if (e.key === 'ArrowLeft') expanded.step(-1);
+    else if (e.key === 'ArrowRight') expanded.step(1);
+    else if (idx >= 0) expanded.show(idx);
+    else if (e.key === 'Enter') {
+      e.preventDefault();
+      expanded.choose();
+    }
+    return;
+  }
   if (document.querySelector('.lightbox')) {
     if (e.key === 'Escape') document.querySelector('.lightbox')!.remove();
     return;
@@ -441,6 +455,79 @@ function zoom(view: View) {
   canvas.style.width = `${cssWidth}px`;
   paint({ ...view, canvas }, cssWidth);
   box.addEventListener('click', () => box.remove());
+}
+
+/**
+ * Show one Choice large, with A–D tabs, arrows and swipe to compare them, and a
+ * button to choose the one on screen. After answering it is for inspection only.
+ */
+function expandChoice(start: number) {
+  let i = start;
+  const box = h(`<div class="lightbox expanded" role="dialog" aria-label="Enlarged Aim View">
+    <canvas></canvas>
+    <div class="lb-controls">
+      <button class="lb-step" data-step="-1" aria-label="Previous view">‹</button>
+      <div class="lb-tabs">${LETTERS.map((l, j) => `<button data-j="${j}">${l}</button>`).join('')}</div>
+      <button class="lb-step" data-step="1" aria-label="Next view">›</button>
+      ${answered ? '' : '<button class="primary lb-choose"></button>'}
+      <button class="lb-close">Close</button>
+    </div>
+  </div>`);
+  document.body.append(box);
+  const canvas = box.querySelector('canvas')!;
+  const tabs = [...box.querySelectorAll<HTMLButtonElement>('.lb-tabs button')];
+  const chooseBtn = box.querySelector<HTMLButtonElement>('.lb-choose');
+  tabs.forEach((t, j) => {
+    if (!answered) return;
+    t.classList.toggle('is-correct', j === shot.correctIndex);
+    t.classList.toggle('is-wrong', j === selected && j !== shot.correctIndex);
+  });
+
+  // Use the screen's height too: on a portrait phone a taller crop magnifies the aim area.
+  const controlsH = window.innerWidth < 480 ? 120 : 76;
+  const pad = 32;
+  const availW = window.innerWidth - pad;
+  const availH = window.innerHeight - pad - controlsH;
+  const aspect = Math.min(AIM_ASPECT, Math.max(0.75, availW / availH));
+  const cssWidth = Math.min(availW, availH * aspect);
+  canvas.style.width = `${cssWidth}px`;
+
+  const show = (j: number) => {
+    i = (j + LETTERS.length) % LETTERS.length;
+    delete canvas.dataset.painted; // same size as before, but a different Choice
+    paint({ ...choiceViews[i], canvas, aspect }, cssWidth);
+    tabs.forEach((t, k) => t.setAttribute('aria-current', String(k === i)));
+    if (chooseBtn) chooseBtn.textContent = `Choose ${LETTERS[i]}`;
+  };
+  const close = () => {
+    box.remove();
+    expanded = null;
+  };
+  const choose = () => {
+    if (answered) return close();
+    select(i);
+    close();
+    app.querySelector('.lock')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  };
+  expanded = { show, step: (d) => show(i + d), choose, close };
+
+  tabs.forEach((t, j) => t.addEventListener('click', () => show(j)));
+  box.querySelectorAll<HTMLButtonElement>('.lb-step').forEach((b) => b.addEventListener('click', () => show(i + Number(b.dataset.step))));
+  chooseBtn?.addEventListener('click', choose);
+  box.querySelector('.lb-close')!.addEventListener('click', close);
+  box.addEventListener('click', (e) => {
+    if (e.target === box) close();
+  });
+  // Swipe between views on touch screens.
+  let touchX: number | null = null;
+  canvas.addEventListener('touchstart', (e) => (touchX = e.touches[0].clientX), { passive: true });
+  canvas.addEventListener('touchend', (e) => {
+    if (touchX === null) return;
+    const dx = e.changedTouches[0].clientX - touchX;
+    touchX = null;
+    if (Math.abs(dx) > 40) show(i + (dx < 0 ? 1 : -1));
+  });
+  show(i);
 }
 
 // ---------- summaries ----------

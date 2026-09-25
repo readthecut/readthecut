@@ -12,6 +12,7 @@ const CUE_ELEVATION = (4 * Math.PI) / 180;
 const CUE_GAP = 0.015; // tip to cue ball
 const AIM_EYE_BACK = 0.35; // along the cue, behind the cue ball
 const AIM_EYE_ABOVE_CUE = 0.11;
+const AIM_FOV_ASPECT = 4 / 3;
 
 const BALL_COLOURS = [
   '#f2c200', '#1f4fb5', '#d42a1e', '#5b2a86', '#f07a12', '#127a3c', '#7a1f1f', '#111111',
@@ -418,7 +419,8 @@ export class TableScene {
     eye.y += AIM_EYE_ABOVE_CUE;
     // Same look distance for every Choice, so they differ only in yaw.
     const lookDist = Math.max(0.5, Math.hypot(s.correct.ghost.x - s.cue.x, s.correct.ghost.z - s.cue.z));
-    this.camera.fov = this.aimFov(target.width / target.height);
+    // FOV is fixed for the thumbnail's 4:3 shape, so a taller canvas is a magnified crop, not a wider view.
+    this.camera.fov = this.aimFov(AIM_FOV_ASPECT);
     this.camera.position.copy(eye);
     this.camera.lookAt(centre.x + a.x * lookDist, cueR, centre.z + a.z * lookDist);
     this.renderTo(target);
