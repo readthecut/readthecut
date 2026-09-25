@@ -291,9 +291,7 @@ canvas,
   z-index: 10;
   cursor: zoom-out;
 }
-.lightbox img {
-  max-width: 100%;
-  max-height: 100%;
+.lightbox canvas {
   border-radius: var(--radius);
 }
 
@@ -309,4 +307,128 @@ canvas,
     position: sticky;
     top: 16px;
   }
+}
+
+/* ---------- indexable intro ---------- */
+
+.about {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 0 16px 72px;
+  color: var(--muted);
+}
+.about h2 {
+  color: var(--text);
+  font-size: 1.3rem;
+  margin: 0 0 0.6em;
+  padding-top: 32px;
+  border-top: 1px solid var(--line);
+}
+.about h3 {
+  color: var(--text);
+  font-size: 1rem;
+  margin: 1.6em 0 0.4em;
+}
+.about strong {
+  color: var(--text);
+}
+.about ol {
+  padding-left: 1.2em;
+}
+.about li {
+  margin-bottom: 0.4em;
+}
+body.playing .about {
+  display: none;
+}
+
+/* ---------- daily & practice ---------- */
+
+.daily {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 32px;
+}
+.daily .hint {
+  margin: 4px 0 12px;
+}
+.daily-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.daily-head span {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.daily .actions {
+  align-items: center;
+}
+.daily .actions .hint {
+  margin: 0;
+}
+.grid {
+  font-size: 1.4rem;
+  letter-spacing: 0.1em;
+  margin: 10px 0 12px;
+}
+.grid.big {
+  font-size: 2rem;
+}
+.practice h2 {
+  font-size: 1rem;
+  color: var(--muted);
+  font-weight: 500;
+}
+.practice .segmented {
+  flex-wrap: wrap;
+}
+.bar-end {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+.streaks {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 16px;
+  text-align: center;
+}
+.streaks strong {
+  display: block;
+  font-size: 1.6rem;
+  color: var(--text);
+}
+.streaks span {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.dist-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  font-variant-numeric: tabular-nums;
+}
+.dist-row > span {
+  width: 1em;
+  color: var(--muted);
+}
+.dist-bar {
+  background: #2b3036;
+  color: var(--text);
+  font-size: 0.8rem;
+  text-align: right;
+  padding: 1px 6px;
+  border-radius: 4px;
+  min-width: 1.6em;
+}
+.dist-bar.mine {
+  background: var(--good);
+  color: #062010;
 }

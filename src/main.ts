@@ -1,31 +1,103 @@
 import './style.css';
-import { BALL_R, BAND_COUNT, BAND_SIZE, bandOf, generateShot, type Difficulty, type Shot } from './geometry';
+import {
+  DAILY_DIFFICULTY,
+  DAILY_FORMAT,
+  DAILY_SHOTS,
+  dailyKeys,
+  dailyNumber,
+  dailyOutcomes,
+  dailySummary,
+  recordDaily,
+  shareText,
+  today,
+  untilTomorrow,
+  type Outcome,
+} from './daily';
+import { FORMAT_IDS, FORMATS, type FormatId } from './formats';
+import { BAND_COUNT, BAND_SIZE, bandOf, missKind, type Difficulty, type Shot } from './geometry';
+import { freshKey, keyFromLocation, share, shotFromKey, shotLink, siteUrl, type ShotKey } from './links';
 import { drawReveal } from './reveal';
 import { TableScene } from './scene';
-import { loadDifficulty, loadStats, resetStats, saveDifficulty, saveStats, type Stats } from './stats';
+import {
+  loadDifficulty,
+  loadFormat,
+  loadStats,
+  resetStats,
+  saveDifficulty,
+  saveFormat,
+  saveStats,
+  statsFor,
+  type Stats,
+} from './stats';
 
 const SET_LENGTH = 10;
+const STANDING_ASPECT = 16 / 10;
+const AIM_ASPECT = 4 / 3;
 const LETTERS = ['A', 'B', 'C', 'D'];
+const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard'];
 
-type Mode = 'set' | 'endless';
+/** How a run of Shots is played: a Set, Endless, today's Daily or a single shared Shot Link. */
+type Mode = 'set' | 'endless' | 'daily' | 'link';
 
 interface Result {
   cutDeg: number;
-  correct: boolean;
+  outcome: Outcome;
 }
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 const table = new TableScene();
 let stats: Stats = loadStats();
 let difficulty: Difficulty = loadDifficulty();
+let format: FormatId = loadFormat();
 
 // Per-run state.
 let mode: Mode = 'set';
 let results: Result[] = [];
+let linkKey: ShotKey | null = null;
+let dailyDate = today();
+let key: ShotKey;
 let shot: Shot;
 let shownAt = 0;
 let selected: number | null = null;
 let answered = false;
+
+/** A 3D view on screen, re-rendered whenever its display size changes. */
+interface View {
+  canvas: HTMLCanvasElement;
+  aspect: number;
+  render: (c: HTMLCanvasElement) => void;
+}
+let views: View[] = [];
+
+const MAX_RENDER_WIDTH = 3200;
+
+/** Backing-store width for a canvas shown `cssWidth` px wide: device pixels, with a floor for 1x screens. */
+const renderWidth = (cssWidth: number) =>
+  Math.min(MAX_RENDER_WIDTH, Math.round(cssWidth * Math.max(devicePixelRatio || 1, 1.5)));
+
+function paint(view: View, cssWidth = view.canvas.clientWidth) {
+  const w = renderWidth(cssWidth);
+  if (!w) return; // not laid out (e.g. hidden)
+  const hgt = Math.round(w / view.aspect);
+  if (view.canvas.width === w && view.canvas.height === hgt && view.canvas.dataset.painted) return;
+  view.canvas.width = w;
+  view.canvas.height = hgt;
+  view.canvas.dataset.painted = '1';
+  view.render(view.canvas);
+}
+
+function addView(canvas: HTMLCanvasElement, aspect: number, render: (c: HTMLCanvasElement) => void) {
+  const view = { canvas, aspect, render };
+  views.push(view);
+  paint(view);
+  return view;
+}
+
+let resizeTimer = 0;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = window.setTimeout(() => views.forEach((v) => paint(v)), 150);
+});
 
 const h = (html: string) => {
   const t = document.createElement('template');
@@ -35,12 +107,54 @@ const h = (html: string) => {
 
 const bandLabel = (b: number) => `${b * BAND_SIZE}–${(b + 1) * BAND_SIZE}°`;
 const pct = (n: number, d: number) => (d ? `${Math.round((100 * n) / d)}%` : '–');
+const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
+const EMOJI: Record<Outcome, string> = { correct: '🟩', over: '🟧', under: '🟦' };
+
+/** Briefly swap a button's label to confirm a share or copy. */
+async function shareFrom(button: HTMLButtonElement, text: string, url?: string) {
+  const result = await share(text, url);
+  if (result === 'shared') return;
+  const label = button.textContent;
+  button.textContent = result === 'copied' ? 'Copied' : 'Could not copy';
+  setTimeout(() => (button.textContent = label), 1600);
+}
+
+function clearLink() {
+  if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+}
 
 // ---------- home ----------
 
+function dailyCard(): string {
+  const date = today();
+  const outcomes = dailyOutcomes(date);
+  const n = dailyNumber(date);
+  const sum = dailySummary(date);
+  const streak = sum.currentStreak ? ` · 🔥 ${sum.currentStreak}-day streak` : '';
+  if (outcomes.length >= DAILY_SHOTS) {
+    const score = outcomes.filter((o) => o === 'correct').length;
+    return `<section class="daily done">
+      <div class="daily-head"><strong>Daily #${n}</strong><span>${score} / ${DAILY_SHOTS}${streak}</span></div>
+      <p class="grid">${outcomes.map((o) => EMOJI[o]).join('')}</p>
+      <div class="actions"><button data-share-daily>Share result</button><span class="hint">Next Daily in ${untilTomorrow()}</span></div>
+    </section>`;
+  }
+  const label = outcomes.length ? `Continue (${outcomes.length} / ${DAILY_SHOTS})` : 'Play today’s Daily';
+  return `<section class="daily">
+    <div class="daily-head"><strong>Daily #${n}</strong><span>${DAILY_SHOTS} shots · ${FORMATS[DAILY_FORMAT].short} · ${cap(DAILY_DIFFICULTY)}${streak}</span></div>
+    <p class="hint">The same five shots for everyone today.</p>
+    <button class="primary" data-daily>${label}</button>
+  </section>`;
+}
+
 function showHome() {
   document.removeEventListener('keydown', onKey);
-  const rows = stats.bands
+  document.body.classList.remove('playing');
+  window.scrollTo({ top: 0 });
+  clearLink();
+  views = [];
+  const fs = statsFor(stats, format);
+  const rows = fs.bands
     .map((b, i) => {
       const acc = b.attempts ? b.correct / b.attempts : 0;
       return `<tr>
@@ -51,33 +165,47 @@ function showHome() {
       </tr>`;
     })
     .join('');
-  const best = stats.bestSet[difficulty];
+  const best = fs.bestSet[difficulty];
+  const f = FORMATS[format];
   app.replaceChildren(
     h(`<main class="home">
-      <h1>Tightsight</h1>
-      <p class="lede">Read the cut from where you stand, then pick the view down the cue that pockets the ball.</p>
-      <div class="segmented" role="radiogroup" aria-label="Difficulty">
-        ${(['easy', 'medium', 'hard'] as Difficulty[])
-          .map((d) => `<button role="radio" aria-checked="${d === difficulty}" data-d="${d}">${d[0].toUpperCase() + d.slice(1)}</button>`)
-          .join('')}
-      </div>
-      <p class="hint">${
-        { easy: 'Wrong Choices miss by a ball-width or more.', medium: 'The closest wrong Choice misses by about half a ball.', hard: 'The closest wrong Choice just catches the jaw.' }[difficulty]
-      }</p>
-      <div class="actions">
-        <button class="primary" data-start="set">Start a Set of ${SET_LENGTH}</button>
-        <button data-start="endless">Endless</button>
-      </div>
-      ${best !== undefined ? `<p class="hint">Best Set on ${difficulty}: ${best} / ${SET_LENGTH}</p>` : ''}
+      <h1>ReadTheCut</h1>
+      <p class="lede">The pool aiming trainer for cut shots. Read the cut from where you stand, then pick the view down the cue that pockets the ball.</p>
+      ${dailyCard()}
+      <section class="practice">
+        <h2>Practice</h2>
+        <div class="segmented" role="radiogroup" aria-label="Table">
+          ${FORMAT_IDS.map((id) => `<button role="radio" aria-checked="${id === format}" data-f="${id}">${FORMATS[id].short}</button>`).join('')}
+        </div>
+        <p class="hint">${f.name}: ${Math.round(f.length * 100)}×${Math.round(f.width * 100)} cm, ${(f.objectR * 2000).toFixed(1)} mm balls, ${Math.round(f.cornerMouth * 1000)} mm corner pockets.</p>
+        <div class="segmented" role="radiogroup" aria-label="Difficulty">
+          ${DIFFICULTIES.map((d) => `<button role="radio" aria-checked="${d === difficulty}" data-d="${d}">${cap(d)}</button>`).join('')}
+        </div>
+        <p class="hint">${
+          { easy: 'Wrong Choices miss by a ball-width or more.', medium: 'The closest wrong Choice misses by about half a ball.', hard: 'The closest wrong Choice just catches the jaw.' }[difficulty]
+        }</p>
+        <div class="actions">
+          <button class="primary" data-start="set">Start a Set of ${SET_LENGTH}</button>
+          <button data-start="endless">Endless</button>
+        </div>
+        ${best !== undefined ? `<p class="hint">Best Set on ${f.short} ${difficulty}: ${best} / ${SET_LENGTH}</p>` : ''}
+      </section>
       <section class="stats">
-        <h2>Accuracy by Cut Angle</h2>
+        <h2>Accuracy by Cut Angle · ${f.short}</h2>
         <table>
           <thead><tr><th>Cut</th><th>Shots</th><th>Correct</th><th>Avg time</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
-        <button class="link" data-reset>Reset stats</button>
+        <button class="link" data-reset>Reset ${f.short} stats</button>
       </section>
     </main>`),
+  );
+  app.querySelectorAll<HTMLButtonElement>('[data-f]').forEach((b) =>
+    b.addEventListener('click', () => {
+      format = b.dataset.f as FormatId;
+      saveFormat(format);
+      showHome();
+    }),
   );
   app.querySelectorAll<HTMLButtonElement>('[data-d]').forEach((b) =>
     b.addEventListener('click', () => {
@@ -89,9 +217,12 @@ function showHome() {
   app.querySelectorAll<HTMLButtonElement>('[data-start]').forEach((b) =>
     b.addEventListener('click', () => start(b.dataset.start as Mode)),
   );
+  app.querySelector('[data-daily]')?.addEventListener('click', () => start('daily'));
+  const shareDaily = app.querySelector<HTMLButtonElement>('[data-share-daily]');
+  shareDaily?.addEventListener('click', () => shareFrom(shareDaily, shareText(today(), dailyOutcomes(today())), siteUrl()));
   app.querySelector('[data-reset]')!.addEventListener('click', () => {
-    if (confirm('Reset all stats?')) {
-      stats = resetStats();
+    if (confirm(`Reset your ${f.name} stats?`)) {
+      resetStats(stats, format);
       showHome();
     }
   });
@@ -99,30 +230,65 @@ function showHome() {
 
 // ---------- question ----------
 
-function start(m: Mode) {
+function start(m: Mode, link: ShotKey | null = null) {
   mode = m;
+  linkKey = link;
   results = [];
+  dailyDate = today();
+  document.body.classList.add('playing');
   document.addEventListener('keydown', onKey);
   nextShot();
 }
 
+function progressLabel(): string {
+  switch (mode) {
+    case 'set':
+      return `Shot ${results.length + 1} / ${SET_LENGTH}`;
+    case 'endless':
+      return `Shot ${results.length + 1}`;
+    case 'daily':
+      return `Daily #${dailyNumber(dailyDate)} · ${dailyOutcomes(dailyDate).length + 1} / ${DAILY_SHOTS}`;
+    case 'link':
+      return 'Shared shot';
+  }
+}
+
 function nextShot() {
   if (mode === 'set' && results.length >= SET_LENGTH) return showSummary();
-  shot = generateShot(difficulty);
+  if (mode === 'daily') {
+    const done = dailyOutcomes(dailyDate).length;
+    if (done >= DAILY_SHOTS) return showDailyDone();
+    key = dailyKeys(dailyDate)[done];
+  } else if (mode === 'link') {
+    if (results.length) {
+      // After the shared Shot, keep training on the same table and difficulty.
+      format = linkKey!.format;
+      difficulty = linkKey!.difficulty;
+      clearLink();
+      return start('endless');
+    }
+    key = linkKey!;
+  } else {
+    key = freshKey(format, difficulty);
+  }
+  shot = shotFromKey(key);
   selected = null;
   answered = false;
 
-  const score = results.filter((r) => r.correct).length;
-  const progress = mode === 'set' ? `Shot ${results.length + 1} / ${SET_LENGTH}` : `Shot ${results.length + 1}`;
+  const score = results.filter((r) => r.outcome === 'correct').length;
+  const f = shot.table.format;
   const view = h(`<main class="play">
     <header class="bar">
       <button class="link" data-home>← Home</button>
-      <span>${progress}</span>
-      <span>Score ${score}${results.length ? ` / ${results.length}` : ''}</span>
+      <span>${progressLabel()} · ${f.short}</span>
+      <span class="bar-end">
+        ${mode === 'daily' ? '' : '<button class="link" data-share-shot>Share shot</button>'}
+        <span>Score ${score}${results.length ? ` / ${results.length}` : ''}</span>
+      </span>
     </header>
     <section class="standing">
       <figure>
-        <canvas width="1600" height="1000" aria-label="Standing View of the shot"></canvas>
+        <canvas width="${STANDING_ASPECT * 300}" height="300" aria-label="Standing View of the shot"></canvas>
         <button class="zoom" aria-label="Enlarge">⤢</button>
       </figure>
       <p class="caption">Standing View. The ringed pocket is the one you're playing.</p>
@@ -136,26 +302,32 @@ function nextShot() {
   </main>`);
   app.replaceChildren(view);
   view.querySelector('[data-home]')!.addEventListener('click', showHome);
+  const shareShot = view.querySelector<HTMLButtonElement>('[data-share-shot]');
+  shareShot?.addEventListener('click', () => shareFrom(shareShot, 'Can you read this cut? Pick the aim that pockets it.', shotLink(key)));
 
-  table.setShot(shot);
-  const standing = view.querySelector<HTMLCanvasElement>('.standing canvas')!;
-  table.renderStanding(standing);
-  view.querySelector('.standing .zoom')!.addEventListener('click', () => zoom(standing));
-
+  // Build the cards first so every canvas has its laid-out size before rendering.
   const grid = view.querySelector('.choices')!;
-  shot.choices.forEach((c, i) => {
+  const cards = shot.choices.map((_, i) => {
     const card = h(`<figure class="choice" tabindex="0" role="button" aria-label="Choice ${LETTERS[i]}">
-      <canvas width="800" height="600"></canvas>
+      <canvas width="${AIM_ASPECT * 300}" height="300"></canvas>
       <figcaption>${LETTERS[i]}</figcaption>
       <button class="zoom" aria-label="Enlarge Choice ${LETTERS[i]}">⤢</button>
     </figure>`);
-    const canvas = card.querySelector('canvas')!;
-    table.renderAim(canvas, c);
+    grid.append(card);
+    return card;
+  });
+
+  table.setShot(shot);
+  views = [];
+  const standing = addView(view.querySelector<HTMLCanvasElement>('.standing canvas')!, STANDING_ASPECT, (c) => table.renderStanding(c));
+  view.querySelector('.standing .zoom')!.addEventListener('click', () => zoom(standing));
+
+  cards.forEach((card, i) => {
+    const aim = addView(card.querySelector('canvas')!, AIM_ASPECT, (c) => table.renderAim(c, shot.choices[i]));
     card.addEventListener('click', (e) => {
-      if ((e.target as HTMLElement).closest('.zoom')) return zoom(canvas);
+      if ((e.target as HTMLElement).closest('.zoom')) return zoom(aim);
       select(i);
     });
-    grid.append(card);
   });
   view.querySelector('.lock')!.addEventListener('click', lockIn);
   shownAt = performance.now();
@@ -169,15 +341,25 @@ function select(i: number) {
   app.querySelector<HTMLButtonElement>('.lock')!.disabled = false;
 }
 
+function nextLabel(): string {
+  if (mode === 'set' && results.length >= SET_LENGTH) return 'See results';
+  if (mode === 'daily' && dailyOutcomes(dailyDate).length >= DAILY_SHOTS) return 'See today’s result';
+  if (mode === 'link') return 'Keep training';
+  return 'Next shot';
+}
+
 function lockIn() {
   if (answered || selected === null) return;
   answered = true;
   const ms = performance.now() - shownAt;
   const chosen = shot.choices[selected];
-  const correct = selected === shot.correctIndex;
-  results.push({ cutDeg: shot.cutDeg, correct });
+  const outcome = missKind(shot, chosen);
+  const correct = outcome === 'correct';
+  results.push({ cutDeg: shot.cutDeg, outcome });
+  if (mode === 'daily') recordDaily(dailyDate, outcome);
 
-  const band = stats.bands[bandOf(shot.cutDeg)];
+  const fs = statsFor(stats, shot.table.format.id);
+  const band = fs.bands[bandOf(shot.cutDeg)];
   band.attempts++;
   band.totalMs += ms;
   if (correct) band.correct++;
@@ -195,8 +377,8 @@ function lockIn() {
     verdict = 'Pocketed.';
   } else {
     const cm = (chosen.miss * 100).toFixed(1);
-    const balls = (chosen.miss / (2 * BALL_R)).toFixed(1);
-    const how = chosen.cutDeg > shot.correct.cutDeg ? 'Overcut (too thin)' : 'Undercut (too thick)';
+    const balls = (chosen.miss / (2 * shot.table.format.objectR)).toFixed(1);
+    const how = outcome === 'over' ? 'Overcut (too thin)' : 'Undercut (too thick)';
     verdict = `${how}. It misses the pocket by ${cm} cm, about ${balls} ball-widths.`;
   }
 
@@ -212,18 +394,19 @@ function lockIn() {
         correct
           ? ''
           : `<div class="compare">
-              <figure><img alt="Your Aim View" /><figcaption>Yours (${LETTERS[selected]})</figcaption></figure>
-              <figure><img alt="Correct Aim View" /><figcaption>Correct (${LETTERS[shot.correctIndex]})</figcaption></figure>
+              <figure><canvas aria-label="Your Aim View"></canvas><figcaption>Yours (${LETTERS[selected]})</figcaption></figure>
+              <figure><canvas aria-label="Correct Aim View"></canvas><figcaption>Correct (${LETTERS[shot.correctIndex]})</figcaption></figure>
             </div>`
       }
-      <button class="primary next">${mode === 'set' && results.length >= SET_LENGTH ? 'See results' : 'Next shot'}</button>
+      <button class="primary next">${nextLabel()}</button>
     </div>`),
   );
   drawReveal(reveal.querySelector('canvas')!, shot, chosen);
   if (!correct) {
-    const [mine, right] = reveal.querySelectorAll('img');
-    mine.src = cards[selected].querySelector('canvas')!.toDataURL('image/jpeg', 0.9);
-    right.src = cards[shot.correctIndex].querySelector('canvas')!.toDataURL('image/jpeg', 0.9);
+    const [mine, right] = reveal.querySelectorAll<HTMLCanvasElement>('.compare canvas');
+    const pick = selected;
+    addView(mine, AIM_ASPECT, (c) => table.renderAim(c, shot.choices[pick]));
+    addView(right, AIM_ASPECT, (c) => table.renderAim(c, shot.correct));
   }
   reveal.querySelector('.next')!.addEventListener('click', nextShot);
   reveal.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -248,34 +431,45 @@ function onKey(e: KeyboardEvent) {
   }
 }
 
-function zoom(canvas: HTMLCanvasElement) {
-  const box = h(`<div class="lightbox" role="dialog" aria-label="Enlarged view"><img alt="" /></div>`);
-  box.querySelector('img')!.src = canvas.toDataURL('image/jpeg', 0.92);
-  box.addEventListener('click', () => box.remove());
+/** Re-render a view at full-screen resolution rather than upscaling the thumbnail. */
+function zoom(view: View) {
+  const box = h(`<div class="lightbox" role="dialog" aria-label="Enlarged view"><canvas></canvas></div>`);
   document.body.append(box);
+  const canvas = box.querySelector('canvas')!;
+  const pad = 32;
+  const cssWidth = Math.min(window.innerWidth - pad, (window.innerHeight - pad) * view.aspect);
+  canvas.style.width = `${cssWidth}px`;
+  paint({ ...view, canvas }, cssWidth);
+  box.addEventListener('click', () => box.remove());
 }
 
-// ---------- summary ----------
+// ---------- summaries ----------
 
 function showSummary() {
   document.removeEventListener('keydown', onKey);
-  const score = results.filter((r) => r.correct).length;
-  const prevBest = stats.bestSet[difficulty];
+  document.body.classList.remove('playing');
+  window.scrollTo({ top: 0 });
+  views = [];
+  const score = results.filter((r) => r.outcome === 'correct').length;
+  const fs = statsFor(stats, format);
+  const prevBest = fs.bestSet[difficulty];
   const isBest = prevBest === undefined || score > prevBest;
   if (isBest) {
-    stats.bestSet[difficulty] = score;
+    fs.bestSet[difficulty] = score;
     saveStats(stats);
   }
   const rows = Array.from({ length: BAND_COUNT }, (_, b) => {
     const inBand = results.filter((r) => bandOf(r.cutDeg) === b);
     if (!inBand.length) return '';
-    const c = inBand.filter((r) => r.correct).length;
+    const c = inBand.filter((r) => r.outcome === 'correct').length;
     return `<tr><td>${bandLabel(b)}</td><td>${c} / ${inBand.length}</td></tr>`;
   }).join('');
+  const label = `${FORMATS[format].short} ${difficulty}`;
   app.replaceChildren(
     h(`<main class="home">
       <h1>${score} / ${SET_LENGTH}</h1>
-      <p class="lede">${isBest ? `New best on ${difficulty}.` : `Best on ${difficulty}: ${prevBest} / ${SET_LENGTH}.`}</p>
+      <p class="lede">${isBest ? `New best on ${label}.` : `Best on ${label}: ${prevBest} / ${SET_LENGTH}.`}</p>
+      <p class="grid">${results.map((r) => EMOJI[r.outcome]).join('')}</p>
       <section class="stats">
         <h2>This Set by Cut Angle</h2>
         <table><thead><tr><th>Cut</th><th>Correct</th></tr></thead><tbody>${rows}</tbody></table>
@@ -290,4 +484,53 @@ function showSummary() {
   app.querySelector('[data-home]')!.addEventListener('click', showHome);
 }
 
-showHome();
+function showDailyDone() {
+  document.removeEventListener('keydown', onKey);
+  document.body.classList.remove('playing');
+  window.scrollTo({ top: 0 });
+  views = [];
+  const outcomes = dailyOutcomes(dailyDate);
+  const score = outcomes.filter((o) => o === 'correct').length;
+  const sum = dailySummary(dailyDate);
+  const most = Math.max(1, ...sum.distribution);
+  const bars = sum.distribution
+    .map((count, i) => `<div class="dist-row"><span>${i}</span><div class="dist-bar${i === score ? ' mine' : ''}" style="width:${Math.max(6, (count / most) * 100)}%">${count}</div></div>`)
+    .reverse()
+    .join('');
+  app.replaceChildren(
+    h(`<main class="home">
+      <p class="hint">Daily #${dailyNumber(dailyDate)}</p>
+      <h1>${score} / ${DAILY_SHOTS}</h1>
+      <p class="grid big">${outcomes.map((o) => EMOJI[o]).join('')}</p>
+      <p class="hint">🟩 correct · 🟧 overcut · 🟦 undercut</p>
+      <div class="actions">
+        <button class="primary" data-share>Share result</button>
+        <button data-home>Home</button>
+      </div>
+      <p class="hint">Next Daily in ${untilTomorrow()}.</p>
+      <section class="stats">
+        <h2>Your Dailies</h2>
+        <div class="streaks">
+          <div><strong>${sum.played}</strong><span>played</span></div>
+          <div><strong>${sum.currentStreak}</strong><span>current streak</span></div>
+          <div><strong>${sum.bestStreak}</strong><span>best streak</span></div>
+        </div>
+        <div class="dist">${bars}</div>
+      </section>
+    </main>`),
+  );
+  const btn = app.querySelector<HTMLButtonElement>('[data-share]')!;
+  btn.addEventListener('click', () => shareFrom(btn, shareText(dailyDate, outcomes), siteUrl()));
+  app.querySelector('[data-home]')!.addEventListener('click', showHome);
+}
+
+// ---------- boot ----------
+
+const initialLink = keyFromLocation();
+if (initialLink) start('link', initialLink);
+else showHome();
+
+window.addEventListener('hashchange', () => {
+  const k = keyFromLocation();
+  if (k) start('link', k);
+});

@@ -1,13 +1,11 @@
 import * as THREE from 'three';
-import { BALL_R, POCKETS, TABLE, type Candidate, type Shot, type V2 } from './geometry';
+import { type Candidate, type Shot, type Table, type V2 } from './geometry';
 
 // Heights are metres above the cloth.
 const CUSHION_H = 0.038;
 const CUSHION_W = 0.05;
 const RAIL_W = 0.13;
 const RAIL_H = 0.046;
-const POCKET_R_CORNER = 0.075;
-const POCKET_R_SIDE = 0.07;
 const STANDING_EYE = 1.6 - 0.76; // eye height minus table height
 const STANDING_BACK = 0.9;
 const CUE_ELEVATION = (4 * Math.PI) / 180;
@@ -15,14 +13,18 @@ const CUE_GAP = 0.015; // tip to cue ball
 const AIM_EYE_BACK = 0.35; // along the cue, behind the cue ball
 const AIM_EYE_ABOVE_CUE = 0.11;
 
-const HALF_L = TABLE.length / 2;
-const HALF_W = TABLE.width / 2;
-
 const BALL_COLOURS = [
   '#f2c200', '#1f4fb5', '#d42a1e', '#5b2a86', '#f07a12', '#127a3c', '#7a1f1f', '#111111',
 ];
 
 export const ballColour = (n: number) => BALL_COLOURS[(n - 1) % 8];
+
+/** UK blackball has unnumbered reds and yellows; the 8 stays black. */
+export const ukBallColour = (n: number) => (n === 8 ? '#111111' : n < 8 ? '#c8211b' : '#f3c300');
+
+/** Colour of the object ball as drawn for this table. */
+export const objectColour = (shot: Shot) =>
+  shot.table.format.balls === 'redsYellows' ? ukBallColour(shot.objectNumber) : ballColour(shot.objectNumber);
 
 /** Build a Shape from world XZ points, for geometry that is later rotated flat onto the table. */
 function flatShape(points: V2[]): THREE.Shape {
@@ -36,9 +38,9 @@ function layFlat(geo: THREE.BufferGeometry, y: number): THREE.BufferGeometry {
 }
 
 /** Outline of the rail's inner edge: the cushion-back rectangle unioned with the pocket holes. */
-function railInnerOutline(): V2[] {
-  const hx = HALF_L + CUSHION_W;
-  const hz = HALF_W + CUSHION_W;
+function railInnerOutline(table: Table): V2[] {
+  const hx = table.halfL + CUSHION_W;
+  const hz = table.halfW + CUSHION_W;
   const pts: V2[] = [];
   const steps = 1440;
   for (let i = 0; i < steps; i++) {
@@ -46,8 +48,8 @@ function railInnerOutline(): V2[] {
     const dx = Math.cos(a);
     const dz = Math.sin(a);
     let r = Math.min(Math.abs(dx) > 1e-9 ? hx / Math.abs(dx) : Infinity, Math.abs(dz) > 1e-9 ? hz / Math.abs(dz) : Infinity);
-    for (const p of POCKETS) {
-      const pr = p.kind === 'corner' ? POCKET_R_CORNER : POCKET_R_SIDE;
+    for (const p of table.pockets) {
+      const pr = p.holeR;
       // Far intersection of the ray with the pocket circle.
       const b = dx * p.hole.x + dz * p.hole.z;
       const c = p.hole.x ** 2 + p.hole.z ** 2 - pr * pr;
@@ -59,11 +61,16 @@ function railInnerOutline(): V2[] {
   return pts;
 }
 
-function ballTexture(n: number): THREE.CanvasTexture {
+function ballTexture(n: number, style: Table['format']['balls']): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = 512;
   c.height = 256;
   const g = c.getContext('2d')!;
+  if (style === 'redsYellows' && n !== 8) {
+    g.fillStyle = ukBallColour(n);
+    g.fillRect(0, 0, c.width, c.height);
+    return finishTexture(c);
+  }
   const colour = ballColour(n);
   if (n <= 8) {
     g.fillStyle = colour;
@@ -89,9 +96,13 @@ function ballTexture(n: number): THREE.CanvasTexture {
     g.fillText(String(n), 0, 0);
     g.restore();
   }
+  return finishTexture(c);
+}
+
+function finishTexture(c: HTMLCanvasElement): THREE.CanvasTexture {
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 4;
+  t.anisotropy = 8;
   return t;
 }
 
@@ -119,11 +130,6 @@ function buildCue(): THREE.Group {
   return cue;
 }
 
-export interface ViewSize {
-  width: number;
-  height: number;
-}
-
 export class TableScene {
   readonly renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
@@ -131,6 +137,8 @@ export class TableScene {
   private objectBall: THREE.Mesh;
   private cue: THREE.Group;
   private pocketMarker: THREE.Mesh;
+  private tableGroup: THREE.Group | null = null;
+  private table: Table | null = null;
   private camera = new THREE.PerspectiveCamera(50, 1, 0.01, 30);
   private shot: Shot | null = null;
 
@@ -142,10 +150,10 @@ export class TableScene {
     this.renderer.toneMappingExposure = 1.05;
     this.scene.background = new THREE.Color('#15171b');
 
-    this.buildTable();
     this.buildLights();
 
-    const ballGeo = new THREE.SphereGeometry(BALL_R, 48, 32);
+    // Unit sphere, scaled to each ball's radius.
+    const ballGeo = new THREE.SphereGeometry(1, 96, 64);
     this.cueBall = new THREE.Mesh(ballGeo, new THREE.MeshStandardMaterial({ color: '#f7f5ee', roughness: 0.18 }));
     this.objectBall = new THREE.Mesh(ballGeo, new THREE.MeshStandardMaterial({ roughness: 0.18 }));
     for (const b of [this.cueBall, this.objectBall]) {
@@ -164,36 +172,55 @@ export class TableScene {
     this.scene.add(this.pocketMarker);
   }
 
-  private buildTable() {
+  /** Replace the table meshes when the Table Format changes. */
+  private useTable(table: Table) {
+    if (this.table === table) return;
+    if (this.tableGroup) {
+      this.scene.remove(this.tableGroup);
+      this.tableGroup.traverse((o) => {
+        if (o instanceof THREE.Mesh) {
+          o.geometry.dispose();
+          (o.material as THREE.Material).dispose();
+        }
+      });
+    }
+    this.table = table;
+    this.tableGroup = this.buildTable(table);
+    this.scene.add(this.tableGroup);
+  }
+
+  private buildTable(table: Table): THREE.Group {
+    const group = new THREE.Group();
+    const { halfL, halfW, pockets } = table;
     const cloth = new THREE.MeshStandardMaterial({ color: '#1d6b47', roughness: 0.95 });
     const cushionCloth = new THREE.MeshStandardMaterial({ color: '#1a6040', roughness: 0.95 });
     const wood = new THREE.MeshStandardMaterial({ color: '#5a3320', roughness: 0.5 });
     const black = new THREE.MeshStandardMaterial({ color: '#050505', roughness: 1, side: THREE.DoubleSide });
 
     const clothMesh = new THREE.Mesh(
-      layFlat(new THREE.PlaneGeometry(TABLE.length + 2 * CUSHION_W, TABLE.width + 2 * CUSHION_W), 0),
+      layFlat(new THREE.PlaneGeometry(table.format.length + 2 * CUSHION_W, table.format.width + 2 * CUSHION_W), 0),
       cloth,
     );
     clothMesh.receiveShadow = true;
-    this.scene.add(clothMesh);
+    group.add(clothMesh);
 
     // Pockets: a black floor just above the cloth plus a wall down from the rail.
-    for (const p of POCKETS) {
-      const r = p.kind === 'corner' ? POCKET_R_CORNER : POCKET_R_SIDE;
+    for (const p of pockets) {
+      const r = p.holeR;
       const floor = new THREE.Mesh(layFlat(new THREE.CircleGeometry(r, 40), 0.0008), black);
       floor.position.set(p.hole.x, 0, p.hole.z);
-      this.scene.add(floor);
+      group.add(floor);
       const wall = new THREE.Mesh(new THREE.CylinderGeometry(r, r, RAIL_H, 40, 1, true), black);
       wall.position.set(p.hole.x, RAIL_H / 2, p.hole.z);
-      this.scene.add(wall);
+      group.add(wall);
     }
 
     // Cushions: one prism per rail segment, running between the jaws.
     const segments: [V2, V2, V2][] = []; // start jaw, end jaw, outward normal
-    const corner = POCKETS.filter((p) => p.kind === 'corner');
-    const side = POCKETS.filter((p) => p.kind === 'side');
-    const jawOnLong = (p: (typeof POCKETS)[number]) => p.jaws.find((j) => Math.abs(Math.abs(j.z) - HALF_W) < 1e-9)!;
-    const jawOnShort = (p: (typeof POCKETS)[number]) => p.jaws.find((j) => Math.abs(Math.abs(j.x) - HALF_L) < 1e-9)!;
+    const corner = pockets.filter((p) => p.kind === 'corner');
+    const side = pockets.filter((p) => p.kind === 'side');
+    const jawOnLong = (p: Table['pockets'][number]) => p.jaws.find((j) => Math.abs(Math.abs(j.z) - halfW) < 1e-9)!;
+    const jawOnShort = (p: Table['pockets'][number]) => p.jaws.find((j) => Math.abs(Math.abs(j.x) - halfL) < 1e-9)!;
     for (const sz of [-1, 1]) {
       const sidePocket = side.find((p) => Math.sign(p.mouth.z) === sz)!;
       for (const sx of [-1, 1]) {
@@ -216,23 +243,23 @@ export class TableScene {
       const geo = new THREE.ExtrudeGeometry(shape, { depth: CUSHION_H, bevelEnabled: false });
       const mesh = new THREE.Mesh(layFlat(geo, 0), cushionCloth);
       mesh.receiveShadow = true;
-      this.scene.add(mesh);
+      group.add(mesh);
     }
 
     // Rails: outer rectangle with the pocket-bitten inner outline cut out.
-    const ox = HALF_L + CUSHION_W + RAIL_W;
-    const oz = HALF_W + CUSHION_W + RAIL_W;
+    const ox = halfL + CUSHION_W + RAIL_W;
+    const oz = halfW + CUSHION_W + RAIL_W;
     const outer = flatShape([
       { x: -ox, z: -oz }, { x: ox, z: -oz }, { x: ox, z: oz }, { x: -ox, z: oz },
     ]);
-    outer.holes.push(new THREE.Path(railInnerOutline().map((p) => new THREE.Vector2(p.x, -p.z))));
+    outer.holes.push(new THREE.Path(railInnerOutline(table).map((p) => new THREE.Vector2(p.x, -p.z))));
     const rail = new THREE.Mesh(layFlat(new THREE.ExtrudeGeometry(outer, { depth: RAIL_H, bevelEnabled: false }), 0), wood);
-    this.scene.add(rail);
+    group.add(rail);
 
     // Table body below the rail.
     const body = new THREE.Mesh(new THREE.BoxGeometry(2 * ox, 0.25, 2 * oz), new THREE.MeshStandardMaterial({ color: '#3d2215', roughness: 0.6 }));
     body.position.y = -0.127; // top face just below the cloth
-    this.scene.add(body);
+    group.add(body);
 
     // Diamonds: every eighth of the length, every quarter of the width.
     const pearl = new THREE.MeshStandardMaterial({ color: '#efe6cf', roughness: 0.3 });
@@ -242,17 +269,18 @@ export class TableScene {
     const addDiamond = (x: number, z: number) => {
       const d = new THREE.Mesh(diamondGeo, pearl);
       d.position.set(x, 0, z);
-      this.scene.add(d);
+      group.add(d);
     };
     for (const k of [-3, -2, -1, 1, 2, 3]) {
-      for (const sz of [-1, 1]) addDiamond((k * TABLE.length) / 8, sz * (HALF_W + railMid));
+      for (const sz of [-1, 1]) addDiamond((k * table.format.length) / 8, sz * (halfW + railMid));
     }
     for (const k of [-1, 0, 1]) {
-      for (const sx of [-1, 1]) addDiamond(sx * (HALF_L + railMid), (k * TABLE.width) / 4);
+      for (const sx of [-1, 1]) addDiamond(sx * (halfL + railMid), (k * table.format.width) / 4);
     }
 
     const floor = new THREE.Mesh(layFlat(new THREE.PlaneGeometry(30, 30), -0.76), new THREE.MeshStandardMaterial({ color: '#23201d', roughness: 1 }));
-    this.scene.add(floor);
+    group.add(floor);
+    return group;
   }
 
   private buildLights() {
@@ -279,15 +307,18 @@ export class TableScene {
 
   setShot(shot: Shot) {
     this.shot = shot;
-    this.cueBall.position.set(shot.cue.x, BALL_R, shot.cue.z);
-    this.objectBall.position.set(shot.object.x, BALL_R, shot.object.z);
-    const r = shot.pocket.kind === 'corner' ? POCKET_R_CORNER : POCKET_R_SIDE;
+    this.useTable(shot.table);
+    const { objectR, cueR, balls } = shot.table.format;
+    this.cueBall.scale.setScalar(cueR);
+    this.cueBall.position.set(shot.cue.x, cueR, shot.cue.z);
+    this.objectBall.scale.setScalar(objectR);
+    this.objectBall.position.set(shot.object.x, objectR, shot.object.z);
     this.pocketMarker.position.set(shot.pocket.hole.x, RAIL_H + 0.001, shot.pocket.hole.z);
-    this.pocketMarker.scale.setScalar(r + 0.004);
-    this.objectBall.rotation.set(Math.random() * 0.8 - 0.4, Math.random() * Math.PI * 2, Math.random() * 0.8 - 0.4);
+    this.pocketMarker.scale.setScalar(shot.pocket.holeR + 0.004);
+    this.objectBall.rotation.set(...shot.objectSpin);
     const mat = this.objectBall.material as THREE.MeshStandardMaterial;
     mat.map?.dispose();
-    mat.map = ballTexture(shot.objectNumber);
+    mat.map = ballTexture(shot.objectNumber, balls);
     mat.needsUpdate = true;
   }
 
@@ -346,10 +377,11 @@ export class TableScene {
     const cos = Math.cos(CUE_ELEVATION);
     const sin = Math.sin(CUE_ELEVATION);
     const back = new THREE.Vector3(-a.x * cos, sin, -a.z * cos); // from tip toward butt
-    const centre = new THREE.Vector3(s.cue.x, BALL_R, s.cue.z);
+    const cueR = s.table.format.cueR;
+    const centre = new THREE.Vector3(s.cue.x, cueR, s.cue.z);
 
     this.cue.visible = true;
-    this.cue.position.copy(centre).addScaledVector(back, BALL_R + CUE_GAP);
+    this.cue.position.copy(centre).addScaledVector(back, cueR + CUE_GAP);
     this.cue.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), back);
 
     const eye = centre.clone().addScaledVector(back, AIM_EYE_BACK);
@@ -358,12 +390,12 @@ export class TableScene {
     const lookDist = Math.max(0.5, Math.hypot(s.correct.ghost.x - s.cue.x, s.correct.ghost.z - s.cue.z));
     this.camera.fov = this.aimFov(target.width / target.height);
     this.camera.position.copy(eye);
-    this.camera.lookAt(centre.x + a.x * lookDist, BALL_R, centre.z + a.z * lookDist);
+    this.camera.lookAt(centre.x + a.x * lookDist, cueR, centre.z + a.z * lookDist);
     this.renderTo(target);
   }
 
   /**
-   * Vertical FOV that keeps the pocket in frame for every Choice. It is shared by
+   * Vertical FOV that keeps the pocket in frame for every Choice, up to a cap. It is shared by
    * all four so the framing can't hint at the answer.
    */
   private aimFov(aspect: number): number {
@@ -380,6 +412,7 @@ export class TableScene {
       maxYaw = Math.max(maxYaw, Math.abs(Math.atan2(lat, fwd)));
     }
     const vFromH = 2 * Math.atan(Math.tan(maxYaw + pad) / aspect);
-    return Math.min(90, Math.max(44, (vFromH * 180) / Math.PI));
+    // Capped so the object ball stays readable; on steep cuts the pocket falls outside the frame, as in real peripheral vision.
+    return Math.min(62, Math.max(44, (vFromH * 180) / Math.PI));
   }
 }

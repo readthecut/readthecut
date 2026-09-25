@@ -1,5 +1,5 @@
-import { ballColour } from './scene';
-import { BALL_R, POCKETS, TABLE, dir, dist, type Candidate, type Shot, type V2 } from './geometry';
+import { objectColour } from './scene';
+import { dir, dist, type Candidate, type Shot, type V2 } from './geometry';
 
 const CORRECT = '#4ade80';
 const WRONG = '#f87171';
@@ -8,8 +8,9 @@ const WRONG = '#f87171';
 export function drawReveal(canvas: HTMLCanvasElement, shot: Shot, chosen: Candidate) {
   const g = canvas.getContext('2d')!;
   const { width, height } = canvas;
+  const { format, pockets } = shot.table;
   const margin = 0.12;
-  const s = Math.min(width / (TABLE.length + 2 * margin), height / (TABLE.width + 2 * margin));
+  const s = Math.min(width / (format.length + 2 * margin), height / (format.width + 2 * margin));
   const ox = width / 2;
   const oy = height / 2;
   const px = (p: V2) => [ox + p.x * s, oy + p.z * s] as const;
@@ -17,14 +18,14 @@ export function drawReveal(canvas: HTMLCanvasElement, shot: Shot, chosen: Candid
   g.clearRect(0, 0, width, height);
   // Rail and cloth.
   g.fillStyle = '#5a3320';
-  g.fillRect(ox - (TABLE.length / 2 + margin) * s, oy - (TABLE.width / 2 + margin) * s, (TABLE.length + 2 * margin) * s, (TABLE.width + 2 * margin) * s);
+  g.fillRect(ox - (format.length / 2 + margin) * s, oy - (format.width / 2 + margin) * s, (format.length + 2 * margin) * s, (format.width + 2 * margin) * s);
   g.fillStyle = '#1d6b47';
-  g.fillRect(ox - (TABLE.length / 2) * s, oy - (TABLE.width / 2) * s, TABLE.length * s, TABLE.width * s);
+  g.fillRect(ox - (format.length / 2) * s, oy - (format.width / 2) * s, format.length * s, format.width * s);
   g.fillStyle = '#050505';
-  for (const p of POCKETS) {
+  for (const p of pockets) {
     const [x, y] = px(p.hole);
     g.beginPath();
-    g.arc(x, y, (p.kind === 'corner' ? 0.075 : 0.07) * s, 0, Math.PI * 2);
+    g.arc(x, y, p.holeR * s, 0, Math.PI * 2);
     g.fill();
   }
 
@@ -38,10 +39,10 @@ export function drawReveal(canvas: HTMLCanvasElement, shot: Shot, chosen: Candid
     g.stroke();
     g.setLineDash([]);
   };
-  const ball = (p: V2, fill: string | null, stroke: string | null) => {
+  const ball = (p: V2, r: number, fill: string | null, stroke: string | null) => {
     const [x, y] = px(p);
     g.beginPath();
-    g.arc(x, y, BALL_R * s, 0, Math.PI * 2);
+    g.arc(x, y, r * s, 0, Math.PI * 2);
     if (fill) {
       g.fillStyle = fill;
       g.fill();
@@ -64,11 +65,11 @@ export function drawReveal(canvas: HTMLCanvasElement, shot: Shot, chosen: Candid
   if (!isCorrect) {
     line(shot.cue, chosen.ghost, WRONG, [6, 4]);
     line(shot.object, obPath(chosen), WRONG, [], 2);
-    ball(chosen.ghost, null, WRONG);
+    ball(chosen.ghost, format.cueR, null, WRONG);
   }
   line(shot.cue, shot.correct.ghost, CORRECT, [6, 4]);
   line(shot.object, obPath(shot.correct), CORRECT, [], 2);
-  ball(shot.correct.ghost, null, CORRECT);
-  ball(shot.cue, '#f7f5ee', null);
-  ball(shot.object, ballColour(shot.objectNumber), null);
+  ball(shot.correct.ghost, format.cueR, null, CORRECT);
+  ball(shot.cue, format.cueR, '#f7f5ee', null);
+  ball(shot.object, format.objectR, objectColour(shot), null);
 }

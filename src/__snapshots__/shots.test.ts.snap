@@ -1,0 +1,7 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Shot Links > keep generator v1 stable 1`] = `0.23202189875946588`;
+
+exports[`Shot Links > keep generator v1 stable 2`] = `0.04061268840407144`;
+
+exports[`Shot Links > keep generator v1 stable 3`] = `1`;

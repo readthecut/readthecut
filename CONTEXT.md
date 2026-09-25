@@ -1,4 +1,4 @@
-# Tightsight
+# ReadTheCut
 
 A training app for judging the aim on cut shots in pool. You look at a layout the way you would standing at the table, then pick which down-on-the-shot view has the correct aim.
 
@@ -7,8 +7,12 @@ A training app for judging the aim on cut shots in pool. You look at a layout th
 ### The shot
 
 **Shot**:
-One cue ball, one object ball and a target pocket on a 9ft table. This is the unit that each question is built from.
+One cue ball, one object ball and a target pocket on a table of one Table Format. This is the unit that each question is built from.
 _Avoid_: Layout, scenario, rack
+
+**Table Format**:
+A named table setup that fixes table size, ball sizes and pocket mouths: US 9ft, US 7ft bar box, UK blackball or Chinese 8-ball.
+_Avoid_: Table type, game, ruleset
 
 **Cut Angle**:
 The angle between the cue ball's line of travel and the object ball's line to the pocket. 0° is a straight-in shot.
@@ -25,6 +29,14 @@ _Avoid_: Target, aim spot
 **Throw**:
 The small sideways push that friction between the balls gives the object ball at contact. It is ignored for now: "correct" means pure geometry.
 _Avoid_: Correction, deflection
+
+**Overcut**:
+A miss from hitting the object ball too thin, so it turns more than the Cut Angle needs.
+_Avoid_: Too much cut, thin miss
+
+**Undercut**:
+A miss from hitting the object ball too full, so it doesn't turn enough.
+_Avoid_: Too little cut, thick miss
 
 ### The question
 
@@ -65,3 +77,21 @@ _Avoid_: Free play, infinite mode
 **Cut Angle Band**:
 A 15° range of Cut Angles (0–15°, 15–30°, …) that accuracy is tracked by.
 _Avoid_: Bucket, difficulty tier
+
+**Daily**:
+Five Shots that are the same for every player on a given local calendar day, on US 9ft at Medium. There is one attempt per day.
+_Avoid_: Daily challenge, puzzle of the day
+
+**Streak**:
+The number of consecutive days with a completed Daily.
+_Avoid_: Run, chain
+
+### Sharing
+
+**Shot Link**:
+A URL that rebuilds one exact Shot for anyone who opens it.
+_Avoid_: Challenge link, permalink
+
+**Share Grid**:
+The spoiler-free emoji line for a Daily or Set: one square per Shot, showing correct, Overcut or Undercut.
+_Avoid_: Result card, emoji score

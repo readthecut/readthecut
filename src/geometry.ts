@@ -1,17 +1,13 @@
 // Table-plane geometry. Coordinates are metres on the cloth, origin at the
 // table centre: x along the length, z along the width (matches three.js XZ).
 
+import { FORMATS, type FormatId, type TableFormat } from './formats';
+import type { Rng } from './rng';
+
 export interface V2 {
   x: number;
   z: number;
 }
-
-export const TABLE = { length: 2.54, width: 1.27 }; // 9ft playing surface, cushion nose to nose
-export const BALL_R = 0.028575; // 2¼" balls
-const CORNER_MOUTH = 0.1143; // 4½"
-const SIDE_MOUTH = 0.127; // 5"
-const HALF_L = TABLE.length / 2;
-const HALF_W = TABLE.width / 2;
 
 export type Difficulty = 'easy' | 'medium' | 'hard';
 
@@ -20,6 +16,15 @@ export interface Pocket {
   jaws: [V2, V2];
   mouth: V2; // midpoint between the jaws
   hole: V2; // visual centre of the pocket opening
+  holeR: number; // visual radius of the opening
+}
+
+/** A Table Format with its pockets laid out. */
+export interface Table {
+  format: TableFormat;
+  halfL: number;
+  halfW: number;
+  pockets: Pocket[];
 }
 
 /** Range of object-ball directions (radians) that pocket the ball. */
@@ -37,9 +42,11 @@ export interface Candidate {
 }
 
 export interface Shot {
+  table: Table;
   cue: V2;
   object: V2;
-  objectNumber: number;
+  objectNumber: number; // 1–15; UK tables map it to red, yellow or black
+  objectSpin: [number, number, number]; // rotation of the object ball, for looks only
   pocket: Pocket;
   window: Window;
   correct: Candidate;
@@ -68,36 +75,48 @@ export function wrap(a: number): number {
 
 // ---------- table ----------
 
-export const POCKETS: Pocket[] = (() => {
-  const a = CORNER_MOUTH / Math.SQRT2;
-  const list: Pocket[] = [];
+const tables = new Map<FormatId, Table>();
+
+export function tableFor(id: FormatId): Table {
+  let t = tables.get(id);
+  if (t) return t;
+  const format = FORMATS[id];
+  const halfL = format.length / 2;
+  const halfW = format.width / 2;
+  const pockets: Pocket[] = [];
+  const a = format.cornerMouth / Math.SQRT2; // jaw distance from the corner along each rail
   for (const sx of [-1, 1]) {
     for (const sz of [-1, 1]) {
-      const jaws: [V2, V2] = [v(sx * (HALF_L - a), sz * HALF_W), v(sx * HALF_L, sz * (HALF_W - a))];
-      list.push({
+      const jaws: [V2, V2] = [v(sx * (halfL - a), sz * halfW), v(sx * halfL, sz * (halfW - a))];
+      pockets.push({
         kind: 'corner',
         jaws,
         mouth: scale(add(jaws[0], jaws[1]), 0.5),
-        hole: v(sx * (HALF_L + 0.015), sz * (HALF_W + 0.015)),
+        hole: v(sx * (halfL + 0.19 * a), sz * (halfW + 0.19 * a)),
+        holeR: 0.93 * a,
       });
     }
   }
+  const s = format.sideMouth / 2;
   for (const sz of [-1, 1]) {
-    const jaws: [V2, V2] = [v(-SIDE_MOUTH / 2, sz * HALF_W), v(SIDE_MOUTH / 2, sz * HALF_W)];
-    list.push({ kind: 'side', jaws, mouth: v(0, sz * HALF_W), hole: v(0, sz * (HALF_W + 0.04)) });
+    const jaws: [V2, V2] = [v(-s, sz * halfW), v(s, sz * halfW)];
+    pockets.push({ kind: 'side', jaws, mouth: v(0, sz * halfW), hole: v(0, sz * (halfW + 0.63 * s)), holeR: 1.1 * s });
   }
-  return list;
-})();
+  t = { format, halfL, halfW, pockets };
+  tables.set(id, t);
+  return t;
+}
 
-export function onTable(p: V2, margin = BALL_R + 0.01): boolean {
-  return Math.abs(p.x) <= HALF_L - margin && Math.abs(p.z) <= HALF_W - margin;
+export function onTable(table: Table, p: V2, r: number): boolean {
+  const margin = r + 0.01;
+  return Math.abs(p.x) <= table.halfL - margin && Math.abs(p.z) <= table.halfW - margin;
 }
 
 /**
  * Directions from `ob` whose path clears both jaws by a ball radius, i.e. the
  * ball drops. Returned angles are unwrapped so that lo < hi.
  */
-export function pocketWindow(ob: V2, pocket: Pocket): Window | null {
+export function pocketWindow(ob: V2, pocket: Pocket, r: number): Window | null {
   let [j1, j2] = pocket.jaws;
   let p1 = angleOf(sub(j1, ob));
   let p2 = angleOf(sub(j2, ob));
@@ -107,9 +126,9 @@ export function pocketWindow(ob: V2, pocket: Pocket): Window | null {
   }
   const d1 = dist(j1, ob);
   const d2 = dist(j2, ob);
-  if (d1 <= BALL_R || d2 <= BALL_R) return null;
-  const lo = p1 + Math.asin(BALL_R / d1);
-  const hi = p1 + wrap(p2 - p1) - Math.asin(BALL_R / d2);
+  if (d1 <= r || d2 <= r) return null;
+  const lo = p1 + Math.asin(r / d1);
+  const hi = p1 + wrap(p2 - p1) - Math.asin(r / d2);
   return hi > lo ? { lo, hi } : null;
 }
 
@@ -124,9 +143,17 @@ export function missDistance(ob: V2, pocket: Pocket, win: Window, obDir: number)
 }
 
 /** Build the cue-ball aim that sends the object ball along `obDir`, or null if the cut is unplayable. */
-export function candidateFor(cue: V2, ob: V2, pocket: Pocket, win: Window, obDir: number): Candidate | null {
+export function candidateFor(
+  table: Table,
+  cue: V2,
+  ob: V2,
+  pocket: Pocket,
+  win: Window,
+  obDir: number,
+): Candidate | null {
+  const { objectR, cueR } = table.format;
   const u = dir(obDir);
-  const ghost = sub(ob, scale(u, 2 * BALL_R));
+  const ghost = sub(ob, scale(u, objectR + cueR));
   const travel = sub(ghost, cue);
   if (len(travel) < 0.05) return null;
   const aimDir = angleOf(travel);
@@ -135,16 +162,21 @@ export function candidateFor(cue: V2, ob: V2, pocket: Pocket, win: Window, obDir
   return { obDir, ghost, aimDir, cutDeg, miss: missDistance(ob, pocket, win, obDir) };
 }
 
+/** Which way a Choice misses: an overcut hits too thin, an undercut too full. */
+export function missKind(shot: Shot, c: Candidate): 'correct' | 'over' | 'under' {
+  if (c === shot.correct) return 'correct';
+  return c.cutDeg > shot.correct.cutDeg ? 'over' : 'under';
+}
+
 // ---------- shot generation ----------
 
-type Rng = () => number;
 const between = (rng: Rng, a: number, b: number) => a + (b - a) * rng();
 
-/** Distance past the window edge for the closest Distractor, and the spacing of the rest. */
+/** Distance past the window edge for the closest Distractor, and the spacing of the rest, in object-ball radii. */
 const DISTRACTOR_SPREAD: Record<Difficulty, { near: number; step: number }> = {
-  easy: { near: 2 * BALL_R, step: 3 * BALL_R },
-  medium: { near: BALL_R, step: 2 * BALL_R },
-  hard: { near: 0.4 * BALL_R, step: 1.4 * BALL_R },
+  easy: { near: 2, step: 3 },
+  medium: { near: 1, step: 2 },
+  hard: { near: 0.4, step: 1.4 },
 };
 
 export const MAX_CUT = 75;
@@ -158,23 +190,25 @@ export function bandOf(cutDeg: number): number {
 
 function makeDistractors(
   rng: Rng,
+  table: Table,
   cue: V2,
   ob: V2,
   pocket: Pocket,
   win: Window,
   difficulty: Difficulty,
 ): Candidate[] | null {
+  const r = table.format.objectR;
   const { near, step } = DISTRACTOR_SPREAD[difficulty];
   const d = dist(ob, pocket.mouth);
   const out: Candidate[] = [];
   for (let i = 0; i < 3; i++) {
-    const m = near + i * step;
+    const m = (near + i * step) * r;
     const offset = Math.atan(m / d);
     const first = rng() < 0.5 ? -1 : 1;
     let made: Candidate | null = null;
     for (const side of [first, -first]) {
       const obDir = side < 0 ? win.lo - offset : win.hi + offset;
-      made = candidateFor(cue, ob, pocket, win, obDir);
+      made = candidateFor(table, cue, ob, pocket, win, obDir);
       if (made) break;
     }
     if (!made) return null;
@@ -183,14 +217,20 @@ function makeDistractors(
   return out;
 }
 
-export function generateShot(difficulty: Difficulty, rng: Rng = Math.random): Shot {
+/**
+ * Generator version 1. Frozen: shared Shot links and past Daily Shots replay
+ * through this exact code (see docs/adr/0001). Changes go in a new version.
+ */
+function generateShotV1(formatId: FormatId, difficulty: Difficulty, rng: Rng): Shot {
+  const table = tableFor(formatId);
+  const { objectR, cueR } = table.format;
   for (let attempt = 0; attempt < 5000; attempt++) {
-    const pocket = POCKETS[Math.floor(rng() * POCKETS.length)];
-    const ob = v(between(rng, -HALF_L, HALF_L), between(rng, -HALF_W, HALF_W));
-    if (!onTable(ob)) continue;
+    const pocket = table.pockets[Math.floor(rng() * table.pockets.length)];
+    const ob = v(between(rng, -table.halfL, table.halfL), between(rng, -table.halfW, table.halfW));
+    if (!onTable(table, ob, objectR)) continue;
     const toPocket = dist(ob, pocket.mouth);
     if (toPocket < 0.2 || toPocket > 2) continue;
-    const win = pocketWindow(ob, pocket);
+    const win = pocketWindow(ob, pocket, objectR);
     // Require a window of at least ~1cm at the mouth, so the shot is genuinely makeable.
     if (!win || (win.hi - win.lo) * toPocket < 0.01) continue;
 
@@ -201,15 +241,15 @@ export function generateShot(difficulty: Difficulty, rng: Rng = Math.random): Sh
     const cutDeg = Math.min(maxCut, between(rng, band * BAND_SIZE, (band + 1) * BAND_SIZE));
 
     const obDir = (win.lo + win.hi) / 2;
-    const ghost = sub(ob, scale(dir(obDir), 2 * BALL_R));
+    const ghost = sub(ob, scale(dir(obDir), objectR + cueR));
     const side = rng() < 0.5 ? -1 : 1;
     const aimDir = obDir + (side * cutDeg * Math.PI) / 180;
     const cue = sub(ghost, scale(dir(aimDir), between(rng, 0.3, 2)));
-    if (!onTable(cue)) continue;
+    if (!onTable(table, cue, cueR)) continue;
 
-    const correct = candidateFor(cue, ob, pocket, win, obDir);
+    const correct = candidateFor(table, cue, ob, pocket, win, obDir);
     if (!correct) continue;
-    const distractors = makeDistractors(rng, cue, ob, pocket, win, difficulty);
+    const distractors = makeDistractors(rng, table, cue, ob, pocket, win, difficulty);
     if (!distractors) continue;
 
     const choices = [correct, ...distractors];
@@ -218,9 +258,11 @@ export function generateShot(difficulty: Difficulty, rng: Rng = Math.random): Sh
       [choices[i], choices[j]] = [choices[j], choices[i]];
     }
     return {
+      table,
       cue,
       object: ob,
       objectNumber: 1 + Math.floor(rng() * 15),
+      objectSpin: [rng() * 0.8 - 0.4, rng() * Math.PI * 2, rng() * 0.8 - 0.4],
       pocket,
       window: win,
       correct,
@@ -230,4 +272,15 @@ export function generateShot(difficulty: Difficulty, rng: Rng = Math.random): Sh
     };
   }
   throw new Error('Could not generate a shot');
+}
+
+export const GENERATORS: Record<number, (f: FormatId, d: Difficulty, rng: Rng) => Shot> = {
+  1: generateShotV1,
+};
+export const CURRENT_GENERATOR = 1;
+
+export function generateShot(formatId: FormatId, difficulty: Difficulty, rng: Rng, version = CURRENT_GENERATOR): Shot {
+  const gen = GENERATORS[version];
+  if (!gen) throw new Error(`Unknown generator version ${version}`);
+  return gen(formatId, difficulty, rng);
 }

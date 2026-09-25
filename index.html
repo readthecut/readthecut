@@ -4,10 +4,85 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#101214" />
-    <title>Tightsight</title>
+    <title>ReadTheCut: Pool Aiming Trainer for Cut Shots</title>
+    <meta
+      name="description"
+      content="Free pool aiming trainer. See the shot from where you stand, then pick the view down the cue that pockets the ball. Practise cut angles, the ghost ball and overcut vs undercut in 8-ball."
+    />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="canonical" href="https://readthecut.github.io/readthecut/" />
+    <!-- Social previews. Switch these URLs to the custom domain once it is set up. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="ReadTheCut" />
+    <meta property="og:title" content="ReadTheCut: Pool Aiming Trainer for Cut Shots" />
+    <meta
+      property="og:description"
+      content="Shot calculators tell you where to aim. ReadTheCut trains your eye to see it."
+    />
+    <meta property="og:url" content="https://readthecut.github.io/readthecut/" />
+    <meta property="og:image" content="https://readthecut.github.io/readthecut/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "ReadTheCut",
+        "description": "A free pool aiming trainer for cut shots. Pick the correct aim from the view down the cue.",
+        "applicationCategory": "SportsApplication",
+        "operatingSystem": "Any",
+        "browserRequirements": "Requires WebGL",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+      }
+    </script>
   </head>
   <body>
     <div id="app"></div>
+
+    <!-- Plain HTML so it is indexable without JavaScript. Hidden while playing. -->
+    <article class="about">
+      <h2>Train your cut shot aim</h2>
+      <p>
+        Plenty of missed cut shots are missed before the stroke, because the aim was wrong. ReadTheCut is a free
+        aiming trainer that builds the one skill a shot calculator can't give you, which is seeing the correct
+        aim from where you actually stand.
+      </p>
+
+      <h3>How it works</h3>
+      <ol>
+        <li>You see a shot from standing height, with the pocket you're playing marked.</li>
+        <li>You get four views down the cue, as if you were already down on the shot. Only one of them pockets the ball.</li>
+        <li>After you pick, a top-down diagram shows the ghost ball, your line and whether you overcut or undercut, and by how much.</li>
+      </ol>
+      <p>
+        Play the Daily (the same five shots for everyone, every day) or practise in Sets of 10 or Endless mode.
+        Your accuracy is tracked by cut angle, so you can see which cuts you misjudge most.
+      </p>
+
+      <h3>Which tables?</h3>
+      <p>
+        Pick the table you play on: a US 9ft tournament table, a US 7ft bar box, a UK blackball table with 2" balls
+        and tight pockets, or a Chinese 8-ball (heyball) table. Cut angles look different on each, so stats are
+        kept separately.
+      </p>
+
+      <h3>What is the ghost ball?</h3>
+      <p>
+        The ghost ball is where the cue ball must be at the moment it touches the object ball for the object
+        ball to go in the pocket. Aiming at the centre of that imaginary ball is the basis of pure-geometry aiming,
+        which is what ReadTheCut uses to decide the correct answer.
+      </p>
+
+      <h3>Overcut vs undercut</h3>
+      <p>
+        An <strong>overcut</strong> hits the object ball too thin, so it turns more than it should and misses past
+        the pocket. An <strong>undercut</strong> hits it too full, so it doesn't turn enough. Knowing which way you
+        tend to miss is half the fix, so the trainer tells you on every shot.
+      </p>
+
+      <h3>Is it free?</h3>
+      <p>Yes. It runs in your browser on phone or desktop, needs no account and keeps your stats on your device.</p>
+    </article>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
