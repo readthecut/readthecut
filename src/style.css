@@ -348,6 +348,23 @@ canvas,
   }
 }
 
+/* ---------- full screen (desktop) ---------- */
+
+/* Use the whole screen, but cap each view by height so the shot fits without scrolling. */
+body.fullscreen .play {
+  max-width: none;
+  padding-bottom: 16px;
+}
+body.fullscreen .standing figure {
+  max-width: calc((100vh - 110px) * 1.6);
+  margin: 0 auto;
+}
+body.fullscreen .answer {
+  max-width: calc((100vh - 210px) / 2 * 4 / 3 * 2 + 10px);
+  width: 100%;
+  justify-self: center;
+}
+
 /* ---------- indexable intro ---------- */
 
 .about {

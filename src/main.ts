@@ -122,6 +122,31 @@ async function shareFrom(button: HTMLButtonElement, text: string, url?: string) 
   setTimeout(() => (button.textContent = label), 1600);
 }
 
+// ---------- full screen ----------
+
+/** Desktop only: phones already fill the screen, and their full-screen support is patchy. */
+const canFullscreen = document.fullscreenEnabled && matchMedia('(pointer: fine)').matches;
+
+function toggleFullscreen() {
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  else document.documentElement.requestFullscreen().catch(() => {});
+}
+
+function syncFullscreen() {
+  const on = !!document.fullscreenElement;
+  document.body.classList.toggle('fullscreen', on);
+  app.querySelectorAll<HTMLButtonElement>('[data-fullscreen]').forEach((b) => {
+    b.textContent = on ? 'Exit full screen' : 'Full screen';
+    b.setAttribute('aria-pressed', String(on));
+  });
+}
+
+document.addEventListener('fullscreenchange', () => {
+  syncFullscreen();
+  // The layout grows or shrinks, so re-render every view at its new size.
+  requestAnimationFrame(() => views.forEach((v) => paint(v)));
+});
+
 function clearLink() {
   if (location.hash) history.replaceState(null, '', location.pathname + location.search);
 }
@@ -285,6 +310,7 @@ function nextShot() {
       <button class="link" data-home>← Home</button>
       <span>${progressLabel()} · ${f.short}</span>
       <span class="bar-end">
+        ${canFullscreen ? '<button class="link" data-fullscreen title="Full screen (F)"></button>' : ''}
         ${mode === 'daily' ? '' : '<button class="link" data-share-shot>Share shot</button>'}
         <span>Score ${score}${results.length ? ` / ${results.length}` : ''}</span>
       </span>
@@ -305,6 +331,8 @@ function nextShot() {
   </main>`);
   app.replaceChildren(view);
   view.querySelector('[data-home]')!.addEventListener('click', showHome);
+  view.querySelector('[data-fullscreen]')?.addEventListener('click', toggleFullscreen);
+  syncFullscreen();
   const shareShot = view.querySelector<HTMLButtonElement>('[data-share-shot]');
   shareShot?.addEventListener('click', () => shareFrom(shareShot, 'Can you read this cut? Pick the aim that pockets it.', shotLink(key)));
 
@@ -432,6 +460,7 @@ function onKey(e: KeyboardEvent) {
     return;
   }
   const k = e.key.toLowerCase();
+  if (k === 'f' && canFullscreen && !e.metaKey && !e.ctrlKey) return toggleFullscreen();
   const idx = ['1', '2', '3', '4'].indexOf(k) >= 0 ? Number(k) - 1 : ['a', 'b', 'c', 'd'].indexOf(k);
   if (idx >= 0 && app.querySelector('.choices')) return select(idx);
   if (e.key === 'Enter' || k === 'n') {
