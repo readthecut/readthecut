@@ -500,3 +500,47 @@ body.playing .about {
   background: var(--good);
   color: #062010;
 }
+
+/* ---------- aim overlay ---------- */
+
+.overlay-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 12px 0 4px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.overlay-toggles span {
+  margin-right: 4px;
+}
+.overlay-toggles button {
+  padding: 0.35em 0.8em;
+  font-size: 0.85rem;
+}
+.overlay-toggles button[aria-pressed='true'] {
+  border-color: var(--good);
+  color: var(--text);
+}
+.overlay-toggles button[aria-pressed='false'] {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.overlay-legend {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 4px 0 0;
+  text-align: center;
+}
+.lightbox .overlay-toggles {
+  margin: 0;
+}
+/* Close-up is a mode, not a layer: off isn't "hidden", so no strike-through. */
+.overlay-toggles button[data-layer='closeUp'] {
+  margin-left: 8px;
+}
+.overlay-toggles button[data-layer='closeUp'][aria-pressed='false'] {
+  text-decoration: none;
+}

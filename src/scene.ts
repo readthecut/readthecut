@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { type Candidate, type Pocket, type Shot, type Table, type V2 } from './geometry';
+import { buildAimOverlay, disposeOverlay, setOverlayResolution, type OverlayLayers } from './overlay';
 
 // Heights are metres above the cloth.
 const CUSHION_H = 0.038;
@@ -401,8 +402,11 @@ export class TableScene {
     this.renderTo(target);
   }
 
-  /** Down on the shot: eye directly over the cue, looking along the aim line of `choice`. */
-  renderAim(target: HTMLCanvasElement, choice: Candidate) {
+  /**
+   * Down on the shot: eye directly over the cue, looking along the aim line of `choice`.
+   * With `layers`, draws the Aim Overlay for that Choice (only ever after answering).
+   */
+  renderAim(target: HTMLCanvasElement, choice: Candidate, layers?: OverlayLayers) {
     const s = this.shot!;
     const a = { x: Math.cos(choice.aimDir), z: Math.sin(choice.aimDir) };
     const cos = Math.cos(CUE_ELEVATION);
@@ -419,11 +423,38 @@ export class TableScene {
     eye.y += AIM_EYE_ABOVE_CUE;
     // Same look distance for every Choice, so they differ only in yaw.
     const lookDist = Math.max(0.5, Math.hypot(s.correct.ghost.x - s.cue.x, s.correct.ghost.z - s.cue.z));
-    // FOV is fixed for the thumbnail's 4:3 shape, so a taller canvas is a magnified crop, not a wider view.
-    this.camera.fov = this.aimFov(AIM_FOV_ASPECT);
     this.camera.position.copy(eye);
-    this.camera.lookAt(centre.x + a.x * lookDist, cueR, centre.z + a.z * lookDist);
+    if (layers?.closeUp) {
+      // Close-up: same eye, narrower field of view aimed at the contact area. A pure
+      // magnification, so what you see is still exactly what the eye sees from there.
+      const { objectR } = s.table.format;
+      const pts = [s.object, s.correct.ghost, choice.ghost];
+      const focus = new THREE.Vector3(
+        pts.reduce((t, p) => t + p.x, 0) / pts.length,
+        objectR,
+        pts.reduce((t, p) => t + p.z, 0) / pts.length,
+      );
+      const span = 10 * objectR; // vertical extent of the frame at the focus distance
+      this.camera.fov = (2 * Math.atan(span / 2 / eye.distanceTo(focus)) * 180) / Math.PI;
+      this.camera.lookAt(focus);
+    } else {
+      // FOV is fixed for the thumbnail's 4:3 shape, so a taller canvas is a magnified crop, not a wider view.
+      this.camera.fov = this.aimFov(AIM_FOV_ASPECT);
+      this.camera.lookAt(centre.x + a.x * lookDist, cueR, centre.z + a.z * lookDist);
+    }
+
+    const overlay = layers && (layers.ghost || layers.contact || layers.lines)
+      ? buildAimOverlay(s, choice, layers, Math.max(1.5, target.height / (layers.closeUp ? 220 : 300)), eye)
+      : null;
+    if (overlay) {
+      setOverlayResolution(overlay, target.width, target.height);
+      this.scene.add(overlay);
+    }
     this.renderTo(target);
+    if (overlay) {
+      this.scene.remove(overlay);
+      disposeOverlay(overlay);
+    }
   }
 
   /**

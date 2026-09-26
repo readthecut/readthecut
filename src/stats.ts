@@ -1,5 +1,6 @@
 import { DEFAULT_FORMAT, isFormatId, type FormatId } from './formats';
 import { BAND_COUNT, type Difficulty } from './geometry';
+import type { OverlayLayers } from './overlay';
 
 export interface BandStats {
   attempts: number;
@@ -19,6 +20,7 @@ const STATS_KEY = 'readthecut.stats.v2';
 const STATS_V1_KEY = 'readthecut.stats.v1'; // one table of stats, all US 9ft
 const DIFFICULTY_KEY = 'readthecut.difficulty';
 const FORMAT_KEY = 'readthecut.format';
+const OVERLAY_KEY = 'readthecut.overlay';
 // Keys from before the rename, read once so existing stats carry over.
 const LEGACY_KEYS: Record<string, string> = {
   [STATS_V1_KEY]: 'tightsight.stats.v1',
@@ -106,3 +108,15 @@ export function loadFormat(): FormatId {
 }
 
 export const saveFormat = (f: FormatId) => write(FORMAT_KEY, f);
+
+/** Aim Overlay layers, all on (and Close-up off) until the viewer changes them. */
+export function loadOverlay(): OverlayLayers {
+  const all: OverlayLayers = { ghost: true, contact: true, lines: true, closeUp: false };
+  try {
+    return { ...all, ...(JSON.parse(localStorage.getItem(OVERLAY_KEY) ?? '{}') as Partial<OverlayLayers>) };
+  } catch {
+    return all;
+  }
+}
+
+export const saveOverlay = (layers: OverlayLayers) => write(OVERLAY_KEY, JSON.stringify(layers));

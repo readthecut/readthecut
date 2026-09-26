@@ -18,13 +18,16 @@ import { BAND_COUNT, BAND_SIZE, DIFFICULTY_MAX_CUT, MIN_TANGENT_CUT, bandOf, mis
 import { freshKey, keyFromLocation, share, shotFromKey, shotLink, siteUrl, type ShotKey } from './links';
 import { drawReveal } from './reveal';
 import { TableScene } from './scene';
+import type { OverlayLayers } from './overlay';
 import {
   loadDifficulty,
   loadFormat,
+  loadOverlay,
   loadStats,
   resetStats,
   saveDifficulty,
   saveFormat,
+  saveOverlay,
   saveStats,
   statsFor,
   type Stats,
@@ -49,6 +52,7 @@ const table = new TableScene();
 let stats: Stats = loadStats();
 let difficulty: Difficulty = loadDifficulty();
 let format: FormatId = loadFormat();
+let overlayLayers: OverlayLayers = loadOverlay();
 
 // Per-run state.
 let mode: Mode = 'set';
@@ -70,7 +74,13 @@ interface View {
 let views: View[] = [];
 let choiceViews: View[] = [];
 /** Controls for the open expanded Aim View, so the keyboard can drive it. */
-let expanded: { show: (j: number) => void; step: (d: number) => void; choose: () => void; close: () => void } | null = null;
+let expanded: {
+  show: (j: number) => void;
+  step: (d: number) => void;
+  choose: () => void;
+  close: () => void;
+  refresh: () => void;
+} | null = null;
 
 const MAX_RENDER_WIDTH = 3200;
 
@@ -94,6 +104,44 @@ function addView(canvas: HTMLCanvasElement, aspect: number, render: (c: HTMLCanv
   views.push(view);
   paint(view);
   return view;
+}
+
+/** Re-render every view, e.g. after the Aim Overlay changes. */
+function repaintAll() {
+  views.forEach((v) => {
+    delete v.canvas.dataset.painted;
+    paint(v);
+  });
+  expanded?.refresh();
+}
+
+/** The Aim Overlay only ever appears after answering, so it can't give the answer away. */
+const aimLayers = () => (answered ? overlayLayers : undefined);
+
+const OVERLAY_LABELS: Record<keyof OverlayLayers, string> = {
+  ghost: 'Ghost ball',
+  contact: 'Contact point',
+  lines: 'Lines',
+  closeUp: 'Close-up',
+};
+
+const overlayToggles = () => `<div class="overlay-toggles" role="group" aria-label="Aim overlay">
+  <span>Show in Aim Views</span>
+  ${(Object.keys(OVERLAY_LABELS) as (keyof OverlayLayers)[])
+    .map((k) => `<button data-layer="${k}" aria-pressed="${overlayLayers[k]}">${OVERLAY_LABELS[k]}</button>`)
+    .join('')}
+</div>`;
+
+function bindOverlayToggles(root: HTMLElement) {
+  root.querySelectorAll<HTMLButtonElement>('[data-layer]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const k = b.dataset.layer as keyof OverlayLayers;
+      overlayLayers = { ...overlayLayers, [k]: !overlayLayers[k] };
+      saveOverlay(overlayLayers);
+      document.querySelectorAll<HTMLButtonElement>(`[data-layer="${k}"]`).forEach((x) => x.setAttribute('aria-pressed', String(overlayLayers[k])));
+      repaintAll();
+    }),
+  );
 }
 
 let resizeTimer = 0;
@@ -358,7 +406,7 @@ function nextShot() {
   view.querySelector('.standing .zoom')!.addEventListener('click', () => zoom(standing));
 
   choiceViews = cards.map((card, i) => {
-    const aim = addView(card.querySelector('canvas')!, AIM_ASPECT, (c) => table.renderAim(c, shot.choices[i]));
+    const aim = addView(card.querySelector('canvas')!, AIM_ASPECT, (c) => table.renderAim(c, shot.choices[i], aimLayers()));
     card.addEventListener('click', () => expandChoice(i));
     return aim;
   });
@@ -435,17 +483,22 @@ function lockIn() {
               <figure><canvas aria-label="Correct Aim View"></canvas><figcaption>Correct (${LETTERS[shot.correctIndex]})</figcaption></figure>
             </div>`
       }
+      ${overlayToggles()}
+      <p class="overlay-legend"><span class="key good"></span>Correct ghost ball, contact point and lines${correct ? '' : ' <span class="key bad"></span>Where your aim sent the cue ball'}</p>
       <button class="primary next">${nextLabel()}</button>
     </div>`),
   );
+  bindOverlayToggles(reveal);
   drawReveal(reveal.querySelector('canvas')!, shot, chosen);
   if (!correct) {
     const [mine, right] = reveal.querySelectorAll<HTMLCanvasElement>('.compare canvas');
     const pick = selected;
-    addView(mine, AIM_ASPECT, (c) => table.renderAim(c, shot.choices[pick]));
-    addView(right, AIM_ASPECT, (c) => table.renderAim(c, shot.correct));
+    addView(mine, AIM_ASPECT, (c) => table.renderAim(c, shot.choices[pick], aimLayers()));
+    addView(right, AIM_ASPECT, (c) => table.renderAim(c, shot.correct, aimLayers()));
   }
   reveal.querySelector('.next')!.addEventListener('click', nextShot);
+  // The thumbnails now get the Aim Overlay too.
+  repaintAll();
   reveal.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
@@ -509,7 +562,9 @@ function expandChoice(start: number) {
       ${answered ? '' : '<button class="primary lb-choose"></button>'}
       <button class="lb-close">Close</button>
     </div>
+    ${answered ? overlayToggles() : ''}
   </div>`);
+  bindOverlayToggles(box);
   document.body.append(box);
   const canvas = box.querySelector('canvas')!;
   const tabs = [...box.querySelectorAll<HTMLButtonElement>('.lb-tabs button')];
@@ -521,7 +576,7 @@ function expandChoice(start: number) {
   });
 
   // Use the screen's height too: on a portrait phone a taller crop magnifies the aim area.
-  const controlsH = window.innerWidth < 480 ? 120 : 76;
+  const controlsH = (window.innerWidth < 480 ? 120 : 76) + (answered ? 48 : 0);
   const pad = 32;
   const availW = window.innerWidth - pad;
   const availH = window.innerHeight - pad - controlsH;
@@ -546,7 +601,7 @@ function expandChoice(start: number) {
     close();
     app.querySelector('.lock')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   };
-  expanded = { show, step: (d) => show(i + d), choose, close };
+  expanded = { show, step: (d) => show(i + d), choose, close, refresh: () => show(i) };
 
   tabs.forEach((t, j) => t.addEventListener('click', () => show(j)));
   box.querySelectorAll<HTMLButtonElement>('.lb-step').forEach((b) => b.addEventListener('click', () => show(i + Number(b.dataset.step))));

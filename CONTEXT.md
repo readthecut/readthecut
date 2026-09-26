@@ -22,6 +22,10 @@ _Avoid_: Cut, angle
 The position the cue ball must occupy at contact for the object ball to travel to the pocket.
 _Avoid_: Contact position
 
+**Contact Point**:
+The point on the object ball that the cue ball touches, on the line between the two ball centres at contact.
+_Avoid_: Hit point, contact spot
+
 **Aim Point**:
 The point the cue is aimed at: the centre of the Ghost Ball as seen down the cue.
 _Avoid_: Target, aim spot
@@ -71,6 +75,14 @@ _Avoid_: Wrong answer, decoy
 **Reveal**:
 The feedback shown after picking a Choice: a top-down diagram of the correct and chosen lines, where the object ball went, and the Cut Angle.
 _Avoid_: Result, explanation
+
+**Aim Overlay**:
+Markings drawn into an Aim View after answering: the Ghost Ball, the Contact Point and the aim and object-ball lines. They're green for the correct aim and red for where a wrong Choice sent the cue ball. It never appears before answering.
+_Avoid_: Hint, guide, answer overlay
+
+**Close-up**:
+An Aim View magnified around the contact area from the same eye position, so the Aim Overlay is readable without changing the perspective.
+_Avoid_: Zoom, detail view
 
 ### Practice
 
