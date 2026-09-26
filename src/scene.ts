@@ -14,6 +14,44 @@ const CUE_GAP = 0.015; // tip to cue ball
 const AIM_EYE_BACK = 0.35; // along the cue, behind the cue ball
 const AIM_EYE_ABOVE_CUE = 0.11;
 const AIM_FOV_ASPECT = 4 / 3;
+const LAMP_HEIGHT = 0.95; // shade height above the cloth, typical for a pool table light
+const LAMP_INTENSITY = 1.35; // candela per lamp
+
+/**
+ * What the balls reflect: a dark room, the three bright lamp shades overhead and
+ * the green cloth below. Real balls show exactly this: lamp highlights on top,
+ * a green cast underneath.
+ */
+function tableLightEnvironment(): THREE.Scene {
+  const env = new THREE.Scene();
+  const room = new THREE.Mesh(new THREE.BoxGeometry(10, 5, 10), new THREE.MeshBasicMaterial({ color: '#16181b', side: THREE.BackSide }));
+  room.position.y = 1.5;
+  env.add(room);
+  const cloth = new THREE.Mesh(layFlat(new THREE.PlaneGeometry(2.6, 1.3), -0.03), new THREE.MeshBasicMaterial({ color: '#1b5c3d' }));
+  env.add(cloth);
+  // HDR colour, far brighter than white, so the shades read as light sources in reflections.
+  const shade = new THREE.MeshBasicMaterial({ color: new THREE.Color(9, 8.4, 7.4), side: THREE.DoubleSide });
+  for (const k of [-1, 0, 1]) {
+    const lamp = new THREE.Mesh(layFlat(new THREE.PlaneGeometry(0.42, 0.34), LAMP_HEIGHT), shade);
+    lamp.position.x = k * 0.8;
+    env.add(lamp);
+  }
+  return env;
+}
+
+/** Soft dark disc where a ball meets the cloth: the contact shadow a lamp's shadow map is too coarse to show. */
+function contactShadowTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d')!;
+  const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grad.addColorStop(0, 'rgba(0,0,0,0.85)');
+  grad.addColorStop(0.35, 'rgba(0,0,0,0.55)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+}
 
 const BALL_COLOURS = [
   '#f2c200', '#1f4fb5', '#d42a1e', '#5b2a86', '#f07a12', '#127a3c', '#7a1f1f', '#111111',
@@ -160,6 +198,7 @@ export class TableScene {
   private objectBall: THREE.Mesh;
   private cue: THREE.Group;
   private pocketMarker: THREE.Mesh;
+  private contactShadows: THREE.Mesh[] = [];
   private tableGroup: THREE.Group | null = null;
   private table: Table | null = null;
   private camera = new THREE.PerspectiveCamera(50, 1, 0.01, 30);
@@ -170,16 +209,33 @@ export class TableScene {
     this.renderer.shadowMap.enabled = true;
     this.renderer.localClippingEnabled = true; // pocket meshes are clipped to outside the playing surface
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMapping = THREE.NeutralToneMapping; // keeps cloth and ball colours true
+    this.renderer.toneMappingExposure = 1.0;
+    // Reflections of the table light, mainly for the glossy balls.
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.scene.environment = pmrem.fromScene(tableLightEnvironment(), 0).texture;
+    pmrem.dispose();
     this.scene.background = new THREE.Color('#15171b');
 
     this.buildLights();
 
     // Unit sphere, scaled to each ball's radius.
     const ballGeo = new THREE.SphereGeometry(1, 96, 64);
-    this.cueBall = new THREE.Mesh(ballGeo, new THREE.MeshStandardMaterial({ color: '#f7f5ee', roughness: 0.18 }));
-    this.objectBall = new THREE.Mesh(ballGeo, new THREE.MeshStandardMaterial({ roughness: 0.18 }));
+    // Phenolic resin balls: a smooth base under a hard, polished clear coat.
+    const ballMaterial = (color?: string) =>
+      new THREE.MeshPhysicalMaterial({ color, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.03 });
+    this.cueBall = new THREE.Mesh(ballGeo, ballMaterial('#f7f5ee'));
+    this.objectBall = new THREE.Mesh(ballGeo, ballMaterial());
+    const shadowTex = contactShadowTexture();
+    for (let i = 0; i < 2; i++) {
+      const blob = new THREE.Mesh(
+        layFlat(new THREE.PlaneGeometry(1, 1), 0),
+        new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false }),
+      );
+      blob.renderOrder = 1;
+      this.contactShadows.push(blob);
+      this.scene.add(blob);
+    }
     for (const b of [this.cueBall, this.objectBall]) {
       b.castShadow = true;
       this.scene.add(b);
@@ -202,6 +258,7 @@ export class TableScene {
     if (this.tableGroup) {
       this.scene.remove(this.tableGroup);
       this.tableGroup.traverse((o) => {
+        if (o instanceof THREE.SpotLight) o.shadow.dispose();
         if (o instanceof THREE.Mesh) {
           o.geometry.dispose();
           (o.material as THREE.Material).dispose();
@@ -210,15 +267,17 @@ export class TableScene {
     }
     this.table = table;
     this.tableGroup = this.buildTable(table);
+    this.buildLamps(table, this.tableGroup);
     this.scene.add(this.tableGroup);
   }
 
   private buildTable(table: Table): THREE.Group {
     const group = new THREE.Group();
     const { halfL, halfW, pockets } = table;
-    const cloth = new THREE.MeshStandardMaterial({ color: '#1d6b47', roughness: 0.95 });
-    const cushionCloth = new THREE.MeshStandardMaterial({ color: '#1a6040', roughness: 0.95 });
-    const wood = new THREE.MeshStandardMaterial({ color: '#5a3320', roughness: 0.5 });
+    // Cloth and wood get little of the environment: the lamps light them, the room barely does.
+    const cloth = new THREE.MeshStandardMaterial({ color: '#1d6b47', roughness: 0.95, envMapIntensity: 0.02 });
+    const cushionCloth = new THREE.MeshStandardMaterial({ color: '#1a6040', roughness: 0.95, envMapIntensity: 0.02 });
+    const wood = new THREE.MeshStandardMaterial({ color: '#5a3320', roughness: 0.5, envMapIntensity: 0.05 });
     const black = new THREE.MeshStandardMaterial({ color: '#050505', roughness: 1, side: THREE.DoubleSide });
 
     const clothMesh = new THREE.Mesh(
@@ -315,24 +374,27 @@ export class TableScene {
   }
 
   private buildLights() {
-    this.scene.add(new THREE.HemisphereLight('#fff6e8', '#20242a', 0.9));
-    // Two lamps over the table, like a real table light.
-    for (const x of [-0.6, 0.6]) {
-      const lamp = new THREE.DirectionalLight('#fff4e2', 1.4);
-      lamp.position.set(x, 3, 0.4);
-      lamp.target.position.set(x * 0.6, 0, 0);
+    // Room fill: a little warm light from above, and green bounce from the cloth onto the balls' undersides.
+    this.scene.add(new THREE.HemisphereLight('#fff3e0', '#1d5a3c', 0.22));
+  }
+
+  /**
+   * A three-shade table light hanging over the centre line. Close, overhead
+   * lamps are what make shadows fall almost straight down under each ball.
+   */
+  private buildLamps(table: Table, group: THREE.Group) {
+    for (const k of [-1, 0, 1]) {
+      const lamp = new THREE.SpotLight('#fff1dc', LAMP_INTENSITY, 0, (62 * Math.PI) / 180, 0.75, 2);
+      lamp.position.set(k * table.halfL * 0.62, LAMP_HEIGHT, 0);
+      lamp.target.position.set(k * table.halfL * 0.62, 0, 0);
       lamp.castShadow = true;
       lamp.shadow.mapSize.set(2048, 2048);
-      const cam = lamp.shadow.camera;
-      cam.left = -1.8;
-      cam.right = 1.8;
-      cam.top = 1.2;
-      cam.bottom = -1.2;
-      cam.near = 1;
-      cam.far = 5;
-      lamp.shadow.bias = -0.0004;
-      lamp.shadow.radius = 4;
-      this.scene.add(lamp, lamp.target);
+      lamp.shadow.camera.near = 0.4;
+      lamp.shadow.camera.far = 2.5;
+      lamp.shadow.bias = -0.0002;
+      lamp.shadow.normalBias = 0.002;
+      lamp.shadow.radius = 5;
+      group.add(lamp, lamp.target);
     }
   }
 
@@ -344,6 +406,13 @@ export class TableScene {
     this.cueBall.position.set(shot.cue.x, cueR, shot.cue.z);
     this.objectBall.scale.setScalar(objectR);
     this.objectBall.position.set(shot.object.x, objectR, shot.object.z);
+    for (const [blob, p, r] of [
+      [this.contactShadows[0], shot.cue, cueR],
+      [this.contactShadows[1], shot.object, objectR],
+    ] as const) {
+      blob.position.set(p.x, 0.0007, p.z);
+      blob.scale.set(r * 2.1, 1, r * 2.1);
+    }
     this.pocketMarker.position.set(shot.pocket.hole.x, RAIL_H + 0.001, shot.pocket.hole.z);
     this.pocketMarker.scale.setScalar(shot.pocket.holeR + 0.004);
     applyClip(this.pocketMarker.material as THREE.Material, pocketClip(shot.table, shot.pocket, CUSHION_W));
