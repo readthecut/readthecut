@@ -88,6 +88,24 @@ _Avoid_: Hint, guide, answer overlay
 An Aim View magnified around the contact area from the same eye position, so the Aim Overlay is readable without changing the perspective.
 _Avoid_: Zoom, detail view
 
+### Learning to see the Ghost Ball
+
+**Ghost Ball Trainer**:
+A drill where the player places the Ghost Ball themselves by moving it round the object ball, scored by how far round it they were off. It has three Stages, and its help fades as accuracy improves. It uses Geometry only for now.
+_Avoid_: Placement mode, ghost drill
+
+**Stage**:
+One step of the Ghost Ball Trainer, each harder to see from: top-down (help: the pocket line), the Standing View (help: the Contact Point), then the Aim View (no help).
+_Avoid_: Level, step
+
+**Placement**:
+Where the player puts the Ghost Ball: its direction from the object ball's centre. The correct one is exactly opposite the object ball's path to the pocket.
+_Avoid_: Guess, answer
+
+**Reference Picture**:
+One of five memorised overlaps (full, ¾, ½, ¼ or ⅛ ball): how much of the object ball the Ghost Ball covers, seen down the cue. Each maps to an exact Cut Angle, since sin(cut) = 1 − overlap.
+_Avoid_: Fraction, ball fraction
+
 ### Practice
 
 **Difficulty**:

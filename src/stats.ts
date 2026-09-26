@@ -2,6 +2,7 @@ import { DEFAULT_FORMAT, isFormatId, type FormatId } from './formats';
 import { BAND_COUNT, type Difficulty } from './geometry';
 import type { OverlayLayers } from './overlay';
 import { isStroke, type Stroke } from './physics';
+import { OVERLAPS, freshProgress, type Stage, type StageProgress } from './trainer';
 
 export interface BandStats {
   attempts: number;
@@ -141,3 +142,34 @@ export function loadStroke(): Stroke {
 }
 
 export const saveStroke = (st: Stroke) => write(STROKE_KEY, st);
+
+// ---------- Ghost Ball Trainer and Reference Pictures ----------
+
+const TRAINER_KEY = 'readthecut.trainer.v1';
+const REFERENCE_KEY = 'readthecut.reference.v1';
+
+export function loadTrainer(): Record<Stage, StageProgress> {
+  const fresh = { 1: freshProgress(), 2: freshProgress(), 3: freshProgress(false) };
+  try {
+    return { ...fresh, ...(JSON.parse(localStorage.getItem(TRAINER_KEY) ?? '{}') as Partial<Record<Stage, StageProgress>>) };
+  } catch {
+    return fresh;
+  }
+}
+
+export const saveTrainer = (t: Record<Stage, StageProgress>) => write(TRAINER_KEY, JSON.stringify(t));
+
+/** Attempts and correct answers per overlap, indexed like OVERLAPS. */
+export type ReferenceStats = { attempts: number; correct: number }[];
+
+export function loadReference(): ReferenceStats {
+  const fresh = OVERLAPS.map(() => ({ attempts: 0, correct: 0 }));
+  try {
+    const s = JSON.parse(localStorage.getItem(REFERENCE_KEY) ?? 'null') as ReferenceStats | null;
+    return s?.length === OVERLAPS.length ? s : fresh;
+  } catch {
+    return fresh;
+  }
+}
+
+export const saveReference = (r: ReferenceStats) => write(REFERENCE_KEY, JSON.stringify(r));

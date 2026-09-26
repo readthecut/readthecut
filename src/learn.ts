@@ -1,0 +1,430 @@
+// Screens for learning to see the ghost ball: the Ghost Ball Trainer and Reference Pictures.
+
+import * as THREE from 'three';
+import type { FormatId } from './formats';
+import { angleOf, sub, type Candidate, type Difficulty, type Shot } from './geometry';
+import { buildPlacementMarkings } from './overlay';
+import { drawPlacement } from './reveal';
+import type { TableScene } from './scene';
+import { loadReference, loadTrainer, saveReference, saveTrainer } from './stats';
+import {
+  AID_OFF_BELOW,
+  OVERLAPS,
+  STAGES,
+  aimFor,
+  assess,
+  movePlacement,
+  overlapCutDeg,
+  recentAverage,
+  recordPlacement,
+  referenceShot,
+  startPlacement,
+  trainerShot,
+  type Placement,
+  type Stage,
+} from './trainer';
+import { addView, repaint, resetViews, type View } from './views';
+
+export interface LearnContext {
+  app: HTMLElement;
+  table: TableScene;
+  h: (html: string) => HTMLElement;
+  home: () => void;
+  format: () => FormatId;
+  difficulty: () => Difficulty;
+}
+
+const NUDGE = (0.5 * Math.PI) / 180;
+/** In the 3D views the balls are small, so the pointer moves this many times further than the ghost ball. */
+const DRAG_GEARING = 4;
+const TOP_DOWN_ASPECT = 16 / 10;
+const STANDING_ASPECT = 16 / 10;
+const AIM_ASPECT = 4 / 3;
+const REFERENCE_SET = 10;
+
+/** One key handler at a time for these screens, removed when leaving them. */
+let keyHandler: ((e: KeyboardEvent) => void) | null = null;
+function setKeys(handler: ((e: KeyboardEvent) => void) | null) {
+  if (keyHandler) document.removeEventListener('keydown', keyHandler);
+  keyHandler = handler;
+  if (handler) document.addEventListener('keydown', handler);
+}
+
+function leave(ctx: LearnContext) {
+  setKeys(null);
+  ctx.table.showPocketMarker(true);
+  ctx.home();
+}
+
+/** The first stage not yet passed, for the home screen and as the default. */
+export function currentStage(): Stage {
+  const t = loadTrainer();
+  return ([1, 2, 3] as Stage[]).find((s) => !t[s].done) ?? 3;
+}
+
+export const stagesPassed = () => ([1, 2, 3] as Stage[]).filter((s) => loadTrainer()[s].done).length;
+
+// ---------- Ghost Ball Trainer ----------
+
+export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
+  const { app, table, h } = ctx;
+  let progress = loadTrainer();
+  let shot: Shot = trainerShot(ctx.format(), ctx.difficulty());
+  let placement: Placement = startPlacement(shot);
+  let answered = false;
+  let view: View;
+  // Drag calibration, refreshed after each render.
+  let toTable: ((x: number, y: number) => { x: number; z: number }) | null = null;
+  let pxPerRad = 0;
+
+  const placed = (): Candidate => aimFor(shot, placement)!;
+  const aid = () => stage !== 3 && progress[stage].aid;
+
+  /** How far the ghost ball moves on screen per radian of Placement, from the view just rendered. */
+  const calibrate = (c: HTMLCanvasElement) => {
+    const { cueR } = shot.table.format;
+    const screenX = (p: Placement) => {
+      const aim = aimFor(shot, p);
+      return aim ? table.project(new THREE.Vector3(aim.ghost.x, cueR, aim.ghost.z), c).x : null;
+    };
+    const eps = 0.01;
+    const here = screenX(placement);
+    const ahead = screenX(placement + eps);
+    const behind = screenX(placement - eps);
+    if (here === null) return;
+    if (ahead !== null) pxPerRad = (ahead - here) / eps;
+    else if (behind !== null) pxPerRad = (here - behind) / eps;
+  };
+
+  const render = (c: HTMLCanvasElement) => {
+    const p = placed();
+    if (stage === 1) {
+      const conv = drawPlacement(c, shot, p, { pocketLineAid: aid(), reveal: answered });
+      toTable = conv.toTable;
+      const next = aimFor(shot, placement + 0.01);
+      if (next) pxPerRad = (conv.toCanvas(next.ghost)[0] - conv.toCanvas(p.ghost)[0]) / 0.01;
+    } else if (stage === 2) {
+      table.renderStanding(c, (eye, lw) =>
+        buildPlacementMarkings(shot, p, { contactAid: aid(), reveal: answered, aimLine: true }, lw, eye),
+      );
+      calibrate(c);
+    } else {
+      table.renderAim(c, p, undefined, (eye, lw) =>
+        buildPlacementMarkings(shot, p, { contactAid: false, reveal: answered, aimLine: false }, lw, eye),
+      );
+      calibrate(c);
+    }
+  };
+
+  let frame = 0;
+  const redraw = () => {
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(() => repaint(view));
+  };
+
+  const move = (to: Placement) => {
+    if (answered) return;
+    placement = movePlacement(shot, placement, to);
+    redraw();
+  };
+  /** Nudge the ghost ball left (−1) or right (+1) on screen. */
+  const nudge = (side: number) => move(placement + side * Math.sign(pxPerRad || 1) * NUDGE);
+
+  const stageTabs = () =>
+    ([1, 2, 3] as Stage[])
+      .map(
+        (s) =>
+          `<button data-stage="${s}" aria-current="${s === stage}">${s}. ${STAGES[s].name}${progress[s].done ? ' ✓' : ''}</button>`,
+      )
+      .join('');
+
+  const aidText = () => {
+    if (stage === 3) return STAGES[3].aid;
+    return aid()
+      ? `<strong>Help on:</strong> ${STAGES[stage].aid} It fades once your last 10 average under ${AID_OFF_BELOW}°.`
+      : '<strong>Help off.</strong> It comes back if your last 10 average over 3°.';
+  };
+
+  const averageText = () => {
+    const avg = recentAverage(progress[stage]);
+    const n = Math.min(10, progress[stage].errors.length);
+    return avg === null ? 'Avg –' : `Avg ${avg.toFixed(1)}° (last ${n})`;
+  };
+
+  function newShot() {
+    shot = trainerShot(ctx.format(), ctx.difficulty());
+    placement = startPlacement(shot);
+    answered = false;
+    build();
+  }
+
+  function build() {
+    const aspect = stage === 1 ? TOP_DOWN_ASPECT : stage === 2 ? STANDING_ASPECT : AIM_ASPECT;
+    const screen = h(`<main class="play learn">
+      <header class="bar">
+        <button class="link" data-home>← Home</button>
+        <span>Stage ${stage}/3 · ${STAGES[stage].view}</span>
+        <span class="avg">${averageText()}</span>
+      </header>
+      <section class="learn-view">
+        <figure><canvas class="drag" aria-label="${STAGES[stage].view}: drag to move the ghost ball"></canvas></figure>
+      </section>
+      <section class="learn-side">
+        <div class="stage-tabs" role="group" aria-label="Stage">${stageTabs()}</div>
+        <p class="prompt">${
+          stage === 3
+            ? 'Drag to swing your aim. The white ghost ball is where the cue ball would be at contact: set it so the object ball drops in the ringed pocket.'
+            : 'Drag the white ghost ball round the object ball until it would send the object ball into the ringed pocket.'
+        }</p>
+        <p class="aid">${aidText()}</p>
+        <div class="nudge">
+          <button data-nudge="-1" aria-label="Nudge left 0.5°">◀ 0.5°</button>
+          <button data-nudge="1" aria-label="Nudge right 0.5°">0.5° ▶</button>
+        </div>
+        <button class="primary lock">Lock in</button>
+        <div class="reveal" hidden></div>
+      </section>
+    </main>`);
+    app.replaceChildren(screen);
+    window.scrollTo({ top: 0 });
+    table.showPocketMarker(true);
+    table.setShot(shot);
+    resetViews();
+    const canvas = screen.querySelector<HTMLCanvasElement>('.learn-view canvas')!;
+    view = addView(canvas, aspect, render);
+
+    screen.querySelector('[data-home]')!.addEventListener('click', () => leave(ctx));
+    screen.querySelectorAll<HTMLButtonElement>('[data-stage]').forEach((b) =>
+      b.addEventListener('click', () => {
+        stage = Number(b.dataset.stage) as Stage;
+        newShot();
+      }),
+    );
+    screen.querySelectorAll<HTMLButtonElement>('[data-nudge]').forEach((b) =>
+      b.addEventListener('click', () => nudge(Number(b.dataset.nudge))),
+    );
+    screen.querySelector('.lock')!.addEventListener('click', lockIn);
+
+    // Drag: top-down follows the pointer round the ball; the 3D views map sideways movement to the ghost ball.
+    let drag: { x: number; from: Placement; perRad: number } | null = null;
+    const canvasX = (e: PointerEvent) => (e.clientX - canvas.getBoundingClientRect().left) * (canvas.width / canvas.clientWidth);
+    const canvasY = (e: PointerEvent) => (e.clientY - canvas.getBoundingClientRect().top) * (canvas.height / canvas.clientHeight);
+    canvas.addEventListener('pointerdown', (e) => {
+      if (answered) return;
+      try {
+        canvas.setPointerCapture(e.pointerId); // keep the drag when the pointer leaves the canvas
+      } catch {
+        // Capture can be refused (e.g. synthetic events); dragging still works inside the canvas.
+      }
+      drag = { x: canvasX(e), from: placement, perRad: pxPerRad };
+      if (stage === 1 && toTable) move(angleOf(sub(toTable(canvasX(e), canvasY(e)), shot.object)));
+    });
+    canvas.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      if (stage === 1 && toTable) move(angleOf(sub(toTable(canvasX(e), canvasY(e)), shot.object)));
+      else if (drag.perRad) move(drag.from + (canvasX(e) - drag.x) / (drag.perRad * DRAG_GEARING));
+    });
+    const end = () => (drag = null);
+    canvas.addEventListener('pointerup', end);
+    canvas.addEventListener('pointercancel', end);
+
+    setKeys((e) => {
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        nudge(-1);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        nudge(1);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (answered) newShot();
+        else lockIn();
+      }
+    });
+  }
+
+  function lockIn() {
+    if (answered) return;
+    answered = true;
+    const a = assess(shot, placement);
+    const { progress: next, change } = recordPlacement(progress[stage], a.errorDeg);
+    progress = { ...progress, [stage]: next };
+    saveTrainer(progress);
+
+    const where =
+      a.kind === 'exact'
+        ? 'Spot on.'
+        : `Your ghost ball was <strong>${a.errorMm.toFixed(1)} mm too ${a.kind}</strong> (${a.errorDeg.toFixed(1)}° round the object ball).`;
+    const outcome =
+      a.miss === 0
+        ? 'Close enough: the object ball still drops.'
+        : a.miss > 0.5
+          ? 'The object ball would miss the pocket by a long way.'
+          : `The object ball would miss by ${(a.miss * 100).toFixed(1)} cm.`;
+    const announce = {
+      aidOff: `Nice: your last 10 averaged under ${AID_OFF_BELOW}°, so the help is off now.`,
+      aidOn: 'Your last 10 averaged over 3°, so the help is back on for a while.',
+      passed: `Stage ${stage} passed: 10 in a row without help, averaging under ${AID_OFF_BELOW}°.${stage < 3 ? ` Try stage ${stage + 1}.` : ''}`,
+    };
+    const reveal = app.querySelector<HTMLElement>('.reveal')!;
+    reveal.hidden = false;
+    reveal.replaceChildren(
+      h(`<div>
+        <p class="verdict ${a.miss > 0 ? 'bad' : 'good'}">${where} ${outcome}</p>
+        <p class="legend"><span class="key placed"></span>Your ghost ball <span class="key good"></span>Correct ghost ball and path</p>
+        ${change ? `<p class="announce">${announce[change]}</p>` : ''}
+        ${stage === 3 ? '<figure class="closeup"><canvas aria-label="Close-up of your ghost ball and the correct one"></canvas><figcaption>Close-up</figcaption></figure>' : ''}
+        <button class="primary next">Next shot</button>
+      </div>`),
+    );
+    app.querySelector<HTMLButtonElement>('.lock')!.hidden = true;
+    app.querySelector('.avg')!.textContent = averageText();
+    app.querySelector('.aid')!.innerHTML = aidText();
+    app.querySelector('.stage-tabs')!.innerHTML = stageTabs();
+    app.querySelectorAll<HTMLButtonElement>('[data-stage]').forEach((b) =>
+      b.addEventListener('click', () => {
+        stage = Number(b.dataset.stage) as Stage;
+        newShot();
+      }),
+    );
+    repaint(view);
+    if (stage === 3) {
+      const p = placed();
+      addView(reveal.querySelector('canvas')!, AIM_ASPECT, (c) =>
+        table.renderAim(c, p, { ghost: false, contact: false, lines: false, closeUp: true }, (eye, lw) =>
+          buildPlacementMarkings(shot, p, { contactAid: false, reveal: true, aimLine: false }, lw, eye),
+        ),
+      );
+    }
+    reveal.querySelector('.next')!.addEventListener('click', newShot);
+    reveal.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  build();
+}
+
+// ---------- Reference Pictures ----------
+
+const AIM_TIPS = [
+  "aim the cue ball's centre at the object ball's centre.",
+  "aim the cue ball's centre halfway between the object ball's centre and its edge.",
+  "aim the cue ball's centre at the object ball's edge.",
+  "aim the cue ball's centre half a radius outside the object ball's edge.",
+  "aim the cue ball's centre three-quarters of a radius outside the edge.",
+];
+
+export function showReference(ctx: LearnContext) {
+  const { app, table, h } = ctx;
+  let results: { overlap: number; correct: boolean }[] = [];
+  let overlap = 0;
+  let shot: Shot;
+  let answered = false;
+  let view: View;
+
+  const layers = () => (answered ? { ghost: true, contact: true, lines: false, closeUp: false } : undefined);
+
+  function next() {
+    if (results.length >= REFERENCE_SET) return summary();
+    overlap = Math.floor(Math.random() * OVERLAPS.length);
+    shot = referenceShot(ctx.format(), overlap);
+    answered = false;
+    const score = results.filter((r) => r.correct).length;
+    const screen = h(`<main class="play learn">
+      <header class="bar">
+        <button class="link" data-home>← Home</button>
+        <span>Reference Pictures · ${results.length + 1} / ${REFERENCE_SET}</span>
+        <span>Score ${score}${results.length ? ` / ${results.length}` : ''}</span>
+      </header>
+      <section class="learn-view">
+        <figure><canvas aria-label="Aim View"></canvas></figure>
+      </section>
+      <section class="learn-side">
+        <p class="prompt">Down on the shot, how much of the object ball does the ghost ball cover?</p>
+        <div class="overlaps" role="group" aria-label="Overlap">
+          ${OVERLAPS.map((o, i) => `<button data-o="${i}"><strong>${o.label}</strong> ball <kbd>${i + 1}</kbd></button>`).join('')}
+        </div>
+        <div class="reveal" hidden></div>
+      </section>
+    </main>`);
+    app.replaceChildren(screen);
+    window.scrollTo({ top: 0 });
+    table.showPocketMarker(false);
+    table.setShot(shot);
+    resetViews();
+    view = addView(screen.querySelector('canvas')!, AIM_ASPECT, (c) => table.renderAim(c, shot.correct, layers()));
+    screen.querySelector('[data-home]')!.addEventListener('click', () => leave(ctx));
+    screen.querySelectorAll<HTMLButtonElement>('[data-o]').forEach((b) => b.addEventListener('click', () => answer(Number(b.dataset.o))));
+    setKeys((e) => {
+      const i = ['1', '2', '3', '4', '5'].indexOf(e.key);
+      if (i >= 0 && !answered) answer(i);
+      else if (e.key === 'Enter' && answered) {
+        e.preventDefault();
+        next();
+      }
+    });
+  }
+
+  function answer(i: number) {
+    if (answered) return;
+    answered = true;
+    const correct = i === overlap;
+    results.push({ overlap, correct });
+    const stats = loadReference();
+    stats[overlap].attempts++;
+    if (correct) stats[overlap].correct++;
+    saveReference(stats);
+
+    app.querySelectorAll<HTMLButtonElement>('[data-o]').forEach((b, j) => {
+      b.disabled = true;
+      b.classList.toggle('is-correct', j === overlap);
+      b.classList.toggle('is-wrong', j === i && !correct);
+    });
+    const o = OVERLAPS[overlap];
+    const reveal = app.querySelector<HTMLElement>('.reveal')!;
+    reveal.hidden = false;
+    reveal.replaceChildren(
+      h(`<div>
+        <p class="verdict ${correct ? 'good' : 'bad'}"><strong>${correct ? 'Correct' : `It was ${o.label} ball`}</strong> · a ${overlapCutDeg(o.fraction).toFixed(1)}° cut.</p>
+        <p class="facts">For a ${o.label === 'Full' ? 'full-ball' : `${o.label}-ball`} hit, ${AIM_TIPS[overlap]}</p>
+        <p class="legend"><span class="key good"></span>Ghost ball and contact point</p>
+        <button class="primary next">${results.length >= REFERENCE_SET ? 'See results' : 'Next'}</button>
+      </div>`),
+    );
+    repaint(view);
+    reveal.querySelector('.next')!.addEventListener('click', next);
+  }
+
+  function summary() {
+    setKeys(null);
+    resetViews();
+    const score = results.filter((r) => r.correct).length;
+    const lifetime = loadReference();
+    const rows = OVERLAPS.map((o, i) => {
+      const mine = results.filter((r) => r.overlap === i);
+      const life = lifetime[i];
+      return `<tr><td>${o.label}${o.label === 'Full' ? '' : ' ball'}</td><td>${overlapCutDeg(o.fraction).toFixed(1)}°</td>
+        <td>${mine.length ? `${mine.filter((r) => r.correct).length} / ${mine.length}` : '–'}</td>
+        <td>${life.attempts ? `${Math.round((100 * life.correct) / life.attempts)}%` : '–'}</td></tr>`;
+    }).join('');
+    app.replaceChildren(
+      h(`<main class="home">
+        <h1>${score} / ${REFERENCE_SET}</h1>
+        <p class="lede">Reference Pictures. Learn these five and every other cut sits between two you know.</p>
+        <section class="stats">
+          <table><thead><tr><th>Overlap</th><th>Cut</th><th>This set</th><th>All time</th></tr></thead><tbody>${rows}</tbody></table>
+        </section>
+        <div class="actions">
+          <button class="primary" data-again>Another set</button>
+          <button data-home>Home</button>
+        </div>
+      </main>`),
+    );
+    app.querySelector('[data-again]')!.addEventListener('click', () => {
+      results = [];
+      next();
+    });
+    app.querySelector('[data-home]')!.addEventListener('click', () => leave(ctx));
+  }
+
+  next();
+}

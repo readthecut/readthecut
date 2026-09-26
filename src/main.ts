@@ -16,8 +16,10 @@ import {
 import { FORMAT_IDS, FORMATS, type FormatId } from './formats';
 import { BAND_COUNT, BAND_SIZE, DIFFICULTY_MAX_CUT, MIN_TANGENT_CUT, bandOf, missKind, stunScratch, type Difficulty, type Shot } from './geometry';
 import { freshKey, keyFromLocation, share, shotFromKey, shotLink, siteUrl, type ShotKey } from './links';
+import { currentStage, showReference, showTrainer, stagesPassed, type LearnContext } from './learn';
 import { drawReveal } from './reveal';
 import { TableScene } from './scene';
+import { addView, paint, paintAll, repaintAll, resetViews, type View } from './views';
 import type { OverlayLayers } from './overlay';
 import { STROKE_IDS, STROKES, strokeThrow, type Stroke } from './physics';
 import {
@@ -85,13 +87,6 @@ let shownAt = 0;
 let selected: number | null = null;
 let answered = false;
 
-/** A 3D view on screen, re-rendered whenever its display size changes. */
-interface View {
-  canvas: HTMLCanvasElement;
-  aspect: number;
-  render: (c: HTMLCanvasElement) => void;
-}
-let views: View[] = [];
 let choiceViews: View[] = [];
 /** Controls for the open expanded Aim View, so the keyboard can drive it. */
 let expanded: {
@@ -102,36 +97,9 @@ let expanded: {
   refresh: () => void;
 } | null = null;
 
-const MAX_RENDER_WIDTH = 3200;
-
-/** Backing-store width for a canvas shown `cssWidth` px wide: device pixels, with a floor for 1x screens. */
-const renderWidth = (cssWidth: number) =>
-  Math.min(MAX_RENDER_WIDTH, Math.round(cssWidth * Math.max(devicePixelRatio || 1, 1.5)));
-
-function paint(view: View, cssWidth = view.canvas.clientWidth) {
-  const w = renderWidth(cssWidth);
-  if (!w) return; // not laid out (e.g. hidden)
-  const hgt = Math.round(w / view.aspect);
-  if (view.canvas.width === w && view.canvas.height === hgt && view.canvas.dataset.painted) return;
-  view.canvas.width = w;
-  view.canvas.height = hgt;
-  view.canvas.dataset.painted = '1';
-  view.render(view.canvas);
-}
-
-function addView(canvas: HTMLCanvasElement, aspect: number, render: (c: HTMLCanvasElement) => void) {
-  const view = { canvas, aspect, render };
-  views.push(view);
-  paint(view);
-  return view;
-}
-
 /** Re-render every view, e.g. after the Aim Overlay changes. */
-function repaintAll() {
-  views.forEach((v) => {
-    delete v.canvas.dataset.painted;
-    paint(v);
-  });
+function repaintEverything() {
+  repaintAll();
   expanded?.refresh();
 }
 
@@ -159,16 +127,12 @@ function bindOverlayToggles(root: HTMLElement) {
       overlayLayers = { ...overlayLayers, [k]: !overlayLayers[k] };
       saveOverlay(overlayLayers);
       document.querySelectorAll<HTMLButtonElement>(`[data-layer="${k}"]`).forEach((x) => x.setAttribute('aria-pressed', String(overlayLayers[k])));
-      repaintAll();
+      repaintEverything();
     }),
   );
 }
 
-let resizeTimer = 0;
-window.addEventListener('resize', () => {
-  clearTimeout(resizeTimer);
-  resizeTimer = window.setTimeout(() => views.forEach((v) => paint(v)), 150);
-});
+
 
 const h = (html: string) => {
   const t = document.createElement('template');
@@ -212,7 +176,7 @@ function syncFullscreen() {
 document.addEventListener('fullscreenchange', () => {
   syncFullscreen();
   // The layout grows or shrinks, so re-render every view at its new size.
-  requestAnimationFrame(() => views.forEach((v) => paint(v)));
+  requestAnimationFrame(paintAll);
 });
 
 function clearLink() {
@@ -248,7 +212,7 @@ function showHome() {
   document.body.classList.remove('playing');
   window.scrollTo({ top: 0 });
   clearLink();
-  views = [];
+  resetViews();
   const fs = statsFor(stats, format, stroke);
   const rows = fs.bands
     .map((b, i) => {
@@ -268,6 +232,19 @@ function showHome() {
       <h1>ReadTheCut</h1>
       <p class="lede">The pool aiming trainer for cut shots. Read the cut from where you stand, then pick the view down the cue that pockets the ball.</p>
       ${dailyCard()}
+      <section class="learn-cards">
+        <h2>Learn to see the ghost ball</h2>
+        <div class="cards">
+          <button data-learn="trainer">
+            <strong>Ghost Ball Trainer</strong>
+            <span>Place the ghost ball yourself. Stage ${currentStage()} of 3${stagesPassed() ? ` · ${stagesPassed()} passed` : ''}</span>
+          </button>
+          <button data-learn="reference">
+            <strong>Reference Pictures</strong>
+            <span>Know the full, ¾, ½, ¼ and ⅛ ball hits on sight</span>
+          </button>
+        </div>
+      </section>
       <section class="practice">
         <h2>Practice</h2>
         <div class="segmented" role="radiogroup" aria-label="Table">
@@ -329,6 +306,14 @@ function showHome() {
     b.addEventListener('click', () => start(b.dataset.start as Mode)),
   );
   app.querySelector('[data-daily]')?.addEventListener('click', () => start('daily'));
+  app.querySelector('[data-learn="trainer"]')!.addEventListener('click', () => {
+    document.body.classList.add('playing');
+    showTrainer(learnContext);
+  });
+  app.querySelector('[data-learn="reference"]')!.addEventListener('click', () => {
+    document.body.classList.add('playing');
+    showReference(learnContext);
+  });
   const shareDaily = app.querySelector<HTMLButtonElement>('[data-share-daily]');
   shareDaily?.addEventListener('click', () => shareFrom(shareDaily, shareText(today(), dailyOutcomes(today())), siteUrl()));
   app.querySelector('[data-reset]')!.addEventListener('click', () => {
@@ -338,6 +323,15 @@ function showHome() {
     }
   });
 }
+
+const learnContext: LearnContext = {
+  app,
+  table,
+  h,
+  home: () => showHome(),
+  format: () => format,
+  difficulty: () => difficulty,
+};
 
 // ---------- question ----------
 
@@ -435,7 +429,7 @@ function nextShot() {
   });
 
   table.setShot(shot);
-  views = [];
+  resetViews();
   const standing = addView(view.querySelector<HTMLCanvasElement>('.standing canvas')!, STANDING_ASPECT, (c) => table.renderStanding(c));
   view.querySelector('.standing .zoom')!.addEventListener('click', () => zoom(standing));
 
@@ -537,7 +531,7 @@ function lockIn() {
   }
   reveal.querySelector('.next')!.addEventListener('click', nextShot);
   // The thumbnails now get the Aim Overlay too.
-  repaintAll();
+  repaintEverything();
   reveal.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
@@ -679,7 +673,7 @@ function showSummary() {
   document.removeEventListener('keydown', onKey);
   document.body.classList.remove('playing');
   window.scrollTo({ top: 0 });
-  views = [];
+  resetViews();
   const score = results.filter((r) => r.outcome === 'correct').length;
   const fs = statsFor(stats, format, stroke);
   const prevBest = fs.bestSet[difficulty];
@@ -718,7 +712,7 @@ function showDailyDone() {
   document.removeEventListener('keydown', onKey);
   document.body.classList.remove('playing');
   window.scrollTo({ top: 0 });
-  views = [];
+  resetViews();
   const outcomes = dailyOutcomes(dailyDate);
   const score = outcomes.filter((o) => o === 'correct').length;
   const sum = dailySummary(dailyDate);

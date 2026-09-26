@@ -191,6 +191,9 @@ function buildCue(): THREE.Group {
   return cue;
 }
 
+/** Extra markings for one render, built for the eye position and a line width in pixels. */
+export type ExtraMarkings = (eye: THREE.Vector3, lineWidthPx: number) => THREE.Group;
+
 export class TableScene {
   readonly renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
@@ -433,7 +436,7 @@ export class TableScene {
   }
 
   /** Eye height, a step behind the cue ball, looking along cue ball → object ball. */
-  renderStanding(target: HTMLCanvasElement) {
+  renderStanding(target: HTMLCanvasElement, extra?: ExtraMarkings) {
     const s = this.shot!;
     this.cue.visible = false;
     const fx = s.object.x - s.cue.x;
@@ -468,14 +471,14 @@ export class TableScene {
     this.camera.fov = vfov;
     this.camera.position.copy(eye);
     this.camera.lookAt(eye.x + f.x * Math.cos(pitch), eye.y - Math.sin(pitch), eye.z + f.z * Math.cos(pitch));
-    this.renderTo(target);
+    this.renderWith(target, extra);
   }
 
   /**
    * Down on the shot: eye directly over the cue, looking along the aim line of `choice`.
    * With `layers`, draws the Aim Overlay for that Choice (only ever after answering).
    */
-  renderAim(target: HTMLCanvasElement, choice: Candidate, layers?: OverlayLayers) {
+  renderAim(target: HTMLCanvasElement, choice: Candidate, layers?: OverlayLayers, extra?: ExtraMarkings) {
     const s = this.shot!;
     const a = { x: Math.cos(choice.aimDir), z: Math.sin(choice.aimDir) };
     const cos = Math.cos(CUE_ELEVATION);
@@ -512,18 +515,41 @@ export class TableScene {
       this.camera.lookAt(centre.x + a.x * lookDist, cueR, centre.z + a.z * lookDist);
     }
 
-    const overlay = layers && (layers.ghost || layers.contact || layers.lines)
-      ? buildAimOverlay(s, choice, layers, Math.max(1.5, target.height / (layers.closeUp ? 220 : 300)), eye)
-      : null;
-    if (overlay) {
-      setOverlayResolution(overlay, target.width, target.height);
-      this.scene.add(overlay);
+    const lineWidth = Math.max(1.5, target.height / (layers?.closeUp ? 220 : 300));
+    this.renderWith(target, (e) => {
+      const g = new THREE.Group();
+      if (layers && (layers.ghost || layers.contact || layers.lines)) g.add(buildAimOverlay(s, choice, layers, lineWidth, e));
+      if (extra) g.add(extra(e, lineWidth));
+      return g;
+    });
+  }
+
+  /** Render with temporary markings added to the scene, then remove and free them. */
+  private renderWith(target: HTMLCanvasElement, extra?: ExtraMarkings) {
+    const group = extra?.(this.camera.position.clone(), Math.max(1.5, target.height / 300));
+    if (group) {
+      setOverlayResolution(group, target.width, target.height);
+      this.scene.add(group);
     }
     this.renderTo(target);
-    if (overlay) {
-      this.scene.remove(overlay);
-      disposeOverlay(overlay);
+    if (group) {
+      this.scene.remove(group);
+      disposeOverlay(group);
     }
+  }
+
+  /**
+   * Where a table-space point appears on the canvas last rendered, in canvas
+   * pixels. Only valid straight after a render, since the camera is shared.
+   */
+  project(p: THREE.Vector3, target: HTMLCanvasElement): { x: number; y: number } {
+    const v = p.clone().project(this.camera);
+    return { x: ((v.x + 1) / 2) * target.width, y: ((1 - v.y) / 2) * target.height };
+  }
+
+  /** Show or hide the ring on the called pocket (drills that aren't about a pocket hide it). */
+  showPocketMarker(visible: boolean) {
+    this.pocketMarker.visible = visible;
   }
 
   /**

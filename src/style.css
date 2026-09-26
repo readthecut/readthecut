@@ -560,3 +560,119 @@ body.playing .about {
 .caption strong {
   color: var(--text);
 }
+
+/* ---------- learning drills ---------- */
+
+.learn-cards h2 {
+  font-size: 1rem;
+  color: var(--muted);
+  font-weight: 500;
+}
+.learn-cards .cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 32px;
+}
+.learn-cards .cards button {
+  text-align: left;
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+}
+.learn-cards .cards span {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+@media (max-width: 480px) {
+  .learn-cards .cards {
+    grid-template-columns: 1fr;
+  }
+}
+.learn canvas.drag {
+  cursor: grab;
+  touch-action: none; /* dragging moves the ghost ball, not the page */
+}
+.learn canvas.drag:active {
+  cursor: grabbing;
+}
+.stage-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.stage-tabs button {
+  padding: 0.4em 0.8em;
+  font-size: 0.85rem;
+}
+.stage-tabs button[aria-current='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.aid {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.aid strong {
+  color: var(--text);
+}
+.nudge {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+.nudge button {
+  flex: 1;
+}
+.announce {
+  color: var(--accent);
+  font-size: 0.9rem;
+}
+.key.placed {
+  background: #f7f5ee;
+}
+.learn .reveal .key.good {
+  margin-left: 12px;
+}
+.closeup {
+  margin: 8px 0 4px;
+}
+.closeup figcaption {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-top: 4px;
+}
+.overlaps {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+.overlaps button {
+  padding: 0.8em 0.2em;
+}
+.overlaps button strong {
+  display: block;
+  font-size: 1.4rem;
+}
+.overlaps kbd {
+  display: none;
+}
+@media (pointer: fine) {
+  .overlaps kbd {
+    display: inline;
+    color: var(--muted);
+    font: inherit;
+    font-size: 0.75rem;
+    margin-left: 4px;
+  }
+}
+.overlaps button.is-correct {
+  border-color: var(--good);
+}
+.overlaps button.is-wrong {
+  border-color: var(--bad);
+}
+.overlaps button:disabled {
+  opacity: 1;
+}

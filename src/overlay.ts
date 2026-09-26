@@ -17,23 +17,10 @@ const BAD = '#f87171';
 const AIM = '#f7f5ee';
 const GEOMETRIC = '#7dd3fc';
 
-/**
- * The Aim Overlay for one Aim View, built in table space from the same
- * geometry that decides the answer, so it sits exactly where the balls meet.
- * On a wrong Choice it shows both where this aim sends the cue ball (red) and
- * where it needed to go (green).
- */
-export function buildAimOverlay(
-  shot: Shot,
-  view: Candidate,
-  layers: OverlayLayers,
-  lineWidthPx: number,
-  eye: THREE.Vector3,
-): THREE.Group {
+/** Drawing helpers for markings in table space, collected into one group. */
+function markingKit(shot: Shot, lineWidthPx: number, eye: THREE.Vector3) {
   const group = new THREE.Group();
   const { objectR, cueR } = shot.table.format;
-  const correct = shot.correct;
-  const isCorrect = view === correct;
   const at = (p: { x: number; z: number }, y: number) => new THREE.Vector3(p.x, y, p.z);
   const obCentre = at(shot.object, objectR);
   const cueCentre = at(shot.cue, cueR);
@@ -56,11 +43,11 @@ export function buildAimOverlay(
   };
 
   // A translucent cue ball at the moment of contact, outlined so two overlapping ghosts stay readable.
-  const ghost = (c: Candidate, colour: string) => {
+  const ghost = (c: Candidate, colour: string, fillOpacity = 0.22) => {
     const centre = at(c.ghost, cueR);
     const fill = new THREE.Mesh(
       new THREE.SphereGeometry(cueR, 48, 32),
-      new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.22, depthWrite: false }),
+      new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: fillOpacity, depthWrite: false }),
     );
     fill.position.copy(centre);
     // Outline ring through the centre, turned to face the eye: that's the sphere's silhouette.
@@ -76,11 +63,11 @@ export function buildAimOverlay(
   };
 
   // The point on the object ball that the cue ball touches: on the line between the two centres.
-  const contact = (c: Candidate, colour: string) => {
+  const contact = (c: Candidate, colour: string, size = 0.2) => {
     const towardGhost = at(c.ghost, cueR).sub(obCentre).normalize();
     // Transparent (though fully opaque) so it is drawn after the translucent ghost, not under it.
     const dot = new THREE.Mesh(
-      new THREE.SphereGeometry(objectR * 0.2, 24, 16),
+      new THREE.SphereGeometry(objectR * size, 24, 16),
       new THREE.MeshBasicMaterial({ color: colour, transparent: true }),
     );
     dot.position.copy(obCentre).addScaledVector(towardGhost, objectR * 1.01);
@@ -94,6 +81,26 @@ export function buildAimOverlay(
     const d = dist(shot.object, shot.pocket.mouth) + (c.miss > 0 ? 0.15 : 0);
     line(obCentre, at({ x: shot.object.x + u.x * d, z: shot.object.z + u.z * d }, objectR), colour, false);
   };
+
+  return { group, at, obCentre, cueCentre, cueR, line, ghost, contact, obPath };
+}
+
+/**
+ * The Aim Overlay for one Aim View, built in table space from the same
+ * geometry that decides the answer, so it sits exactly where the balls meet.
+ * On a wrong Choice it shows both where this aim sends the cue ball (red) and
+ * where it needed to go (green).
+ */
+export function buildAimOverlay(
+  shot: Shot,
+  view: Candidate,
+  layers: OverlayLayers,
+  lineWidthPx: number,
+  eye: THREE.Vector3,
+): THREE.Group {
+  const { group, at, cueCentre, cueR, line, ghost, contact, obPath } = markingKit(shot, lineWidthPx, eye);
+  const correct = shot.correct;
+  const isCorrect = view === correct;
 
   const viewColour = isCorrect ? GOOD : BAD;
   if (layers.lines) {
@@ -131,4 +138,35 @@ export function setOverlayResolution(group: THREE.Group, width: number, height: 
   group.traverse((o) => {
     if (o instanceof Line2) (o.material as LineMaterial).resolution.set(width, height);
   });
+}
+
+// The placed ghost ball is a see-through cue ball: white, so it never matches an object ball's colour.
+export const PLACED = '#f7f5ee';
+
+/**
+ * Markings for the Ghost Ball Trainer: the viewer's placed ghost ball (yellow),
+ * an optional aid, and after locking in, the correct ghost ball and both paths.
+ */
+export function buildPlacementMarkings(
+  shot: Shot,
+  placed: Candidate,
+  opts: { contactAid: boolean; reveal: boolean; aimLine: boolean },
+  lineWidthPx: number,
+  eye: THREE.Vector3,
+): THREE.Group {
+  const { group, at, cueCentre, cueR, line, ghost, contact, obPath } = markingKit(shot, lineWidthPx, eye);
+  if (opts.aimLine) line(cueCentre, at(placed.ghost, cueR), AIM, true);
+  ghost(placed, PLACED, 0.3);
+  // Larger than the reveal dots: this aid has to read from standing height.
+  if (opts.contactAid && !opts.reveal) contact(shot.correct, GOOD, 0.4);
+  if (opts.reveal) {
+    obPath(placed, placed.miss > 0 ? BAD : GOOD);
+    if (placed !== shot.correct) {
+      ghost(shot.correct, GOOD);
+      obPath(shot.correct, GOOD);
+      contact(shot.correct, GOOD);
+    }
+    contact(placed, PLACED);
+  }
+  return group;
 }
