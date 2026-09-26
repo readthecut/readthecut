@@ -632,9 +632,6 @@ body.playing .about {
 .key.placed {
   background: #f7f5ee;
 }
-.learn .reveal .key.good {
-  margin-left: 12px;
-}
 .closeup {
   margin: 8px 0 4px;
 }
@@ -675,4 +672,8 @@ body.playing .about {
 }
 .overlaps button:disabled {
   opacity: 1;
+}
+
+.overlay-toggles button .key {
+  margin: 0 6px 0 0;
 }

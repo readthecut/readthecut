@@ -144,29 +144,32 @@ export function setOverlayResolution(group: THREE.Group, width: number, height: 
 export const PLACED = '#f7f5ee';
 
 /**
- * Markings for the Ghost Ball Trainer: the viewer's placed ghost ball (yellow),
+ * Markings for the Ghost Ball Trainer: the viewer's placed ghost ball (white),
  * an optional aid, and after locking in, the correct ghost ball and both paths.
+ * After locking in, `showMine` and `showCorrect` switch each set on or off.
  */
 export function buildPlacementMarkings(
   shot: Shot,
   placed: Candidate,
-  opts: { contactAid: boolean; reveal: boolean; aimLine: boolean },
+  opts: { contactAid: boolean; reveal: boolean; aimLine: boolean; showMine?: boolean; showCorrect?: boolean },
   lineWidthPx: number,
   eye: THREE.Vector3,
 ): THREE.Group {
   const { group, at, cueCentre, cueR, line, ghost, contact, obPath } = markingKit(shot, lineWidthPx, eye);
-  if (opts.aimLine) line(cueCentre, at(placed.ghost, cueR), AIM, true);
-  ghost(placed, PLACED, 0.3);
+  const mine = !opts.reveal || opts.showMine !== false;
+  const correct = opts.reveal && opts.showCorrect !== false;
+  if (opts.aimLine && mine) line(cueCentre, at(placed.ghost, cueR), AIM, true);
+  if (mine) ghost(placed, PLACED, 0.3);
   // Larger than the reveal dots: this aid has to read from standing height.
   if (opts.contactAid && !opts.reveal) contact(shot.correct, GOOD, 0.4);
-  if (opts.reveal) {
+  if (opts.reveal && mine) {
     obPath(placed, placed.miss > 0 ? BAD : GOOD);
-    if (placed !== shot.correct) {
-      ghost(shot.correct, GOOD);
-      obPath(shot.correct, GOOD);
-      contact(shot.correct, GOOD);
-    }
     contact(placed, PLACED);
+  }
+  if (correct) {
+    ghost(shot.correct, GOOD);
+    obPath(shot.correct, GOOD);
+    contact(shot.correct, GOOD);
   }
   return group;
 }

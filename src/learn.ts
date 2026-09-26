@@ -42,6 +42,9 @@ const STANDING_ASPECT = 16 / 10;
 const AIM_ASPECT = 4 / 3;
 const REFERENCE_SET = 10;
 
+/** Which sets of markings to show after locking in. Both come back on at every lock-in, so you always see your result first. */
+const revealShown = { mine: true, correct: true };
+
 /** One key handler at a time for these screens, removed when leaving them. */
 let keyHandler: ((e: KeyboardEvent) => void) | null = null;
 function setKeys(handler: ((e: KeyboardEvent) => void) | null) {
@@ -72,7 +75,10 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
   let shot: Shot = trainerShot(ctx.format(), ctx.difficulty());
   let placement: Placement = startPlacement(shot);
   let answered = false;
+  /** Stages whose answer has been shown for this shot: a repeat in another stage isn't scored. */
+  let revealedIn = new Set<Stage>();
   let view: View;
+  let closeUp: View | null = null;
   // Drag calibration, refreshed after each render.
   let toTable: ((x: number, y: number) => { x: number; z: number }) | null = null;
   let pxPerRad = 0;
@@ -96,21 +102,23 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
     else if (behind !== null) pxPerRad = (here - behind) / eps;
   };
 
+  const shownSets = () => ({ showMine: revealShown.mine, showCorrect: revealShown.correct });
+
   const render = (c: HTMLCanvasElement) => {
     const p = placed();
     if (stage === 1) {
-      const conv = drawPlacement(c, shot, p, { pocketLineAid: aid(), reveal: answered });
+      const conv = drawPlacement(c, shot, p, { pocketLineAid: aid(), reveal: answered, showMine: revealShown.mine, showCorrect: revealShown.correct });
       toTable = conv.toTable;
       const next = aimFor(shot, placement + 0.01);
       if (next) pxPerRad = (conv.toCanvas(next.ghost)[0] - conv.toCanvas(p.ghost)[0]) / 0.01;
     } else if (stage === 2) {
       table.renderStanding(c, (eye, lw) =>
-        buildPlacementMarkings(shot, p, { contactAid: aid(), reveal: answered, aimLine: true }, lw, eye),
+        buildPlacementMarkings(shot, p, { contactAid: aid(), reveal: answered, aimLine: true, ...shownSets() }, lw, eye),
       );
       calibrate(c);
     } else {
       table.renderAim(c, p, undefined, (eye, lw) =>
-        buildPlacementMarkings(shot, p, { contactAid: false, reveal: answered, aimLine: false }, lw, eye),
+        buildPlacementMarkings(shot, p, { contactAid: false, reveal: answered, aimLine: false, ...shownSets() }, lw, eye),
       );
       calibrate(c);
     }
@@ -153,10 +161,24 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
 
   function newShot() {
     shot = trainerShot(ctx.format(), ctx.difficulty());
+    revealedIn = new Set();
+    restart();
+  }
+
+  /** Place this same shot again from the start: after switching Stage, the balls stay where they are. */
+  function restart() {
     placement = startPlacement(shot);
     answered = false;
     build();
   }
+
+  const bindStageTabs = (root: ParentNode) =>
+    root.querySelectorAll<HTMLButtonElement>('[data-stage]').forEach((b) =>
+      b.addEventListener('click', () => {
+        stage = Number(b.dataset.stage) as Stage;
+        restart();
+      }),
+    );
 
   function build() {
     const aspect = stage === 1 ? TOP_DOWN_ASPECT : stage === 2 ? STANDING_ASPECT : AIM_ASPECT;
@@ -190,16 +212,12 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
     table.showPocketMarker(true);
     table.setShot(shot);
     resetViews();
+    closeUp = null;
     const canvas = screen.querySelector<HTMLCanvasElement>('.learn-view canvas')!;
     view = addView(canvas, aspect, render);
 
     screen.querySelector('[data-home]')!.addEventListener('click', () => leave(ctx));
-    screen.querySelectorAll<HTMLButtonElement>('[data-stage]').forEach((b) =>
-      b.addEventListener('click', () => {
-        stage = Number(b.dataset.stage) as Stage;
-        newShot();
-      }),
-    );
+    bindStageTabs(screen);
     screen.querySelectorAll<HTMLButtonElement>('[data-nudge]').forEach((b) =>
       b.addEventListener('click', () => nudge(Number(b.dataset.nudge))),
     );
@@ -246,10 +264,19 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
   function lockIn() {
     if (answered) return;
     answered = true;
+    revealShown.mine = true;
+    revealShown.correct = true;
     const a = assess(shot, placement);
-    const { progress: next, change } = recordPlacement(progress[stage], a.errorDeg);
-    progress = { ...progress, [stage]: next };
-    saveTrainer(progress);
+    // Once the answer has been seen in one Stage, placing the same shot in another is much easier.
+    const scored = revealedIn.size === 0;
+    revealedIn.add(stage);
+    let change: ReturnType<typeof recordPlacement>['change'] = null;
+    if (scored) {
+      const r = recordPlacement(progress[stage], a.errorDeg);
+      progress = { ...progress, [stage]: r.progress };
+      change = r.change;
+      saveTrainer(progress);
+    }
 
     const where =
       a.kind === 'exact'
@@ -271,7 +298,11 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
     reveal.replaceChildren(
       h(`<div>
         <p class="verdict ${a.miss > 0 ? 'bad' : 'good'}">${where} ${outcome}</p>
-        <p class="legend"><span class="key placed"></span>Your ghost ball <span class="key good"></span>Correct ghost ball and path</p>
+        ${scored ? '' : '<p class="facts">Not scored: you have already seen this shot’s answer in another stage.</p>'}
+        <div class="overlay-toggles" role="group" aria-label="Show">
+          <button data-show="mine" aria-pressed="${revealShown.mine}"><span class="key placed"></span>Your ghost ball &amp; path</button>
+          <button data-show="correct" aria-pressed="${revealShown.correct}"><span class="key good"></span>Correct ghost ball &amp; path</button>
+        </div>
         ${change ? `<p class="announce">${announce[change]}</p>` : ''}
         ${stage === 3 ? '<figure class="closeup"><canvas aria-label="Close-up of your ghost ball and the correct one"></canvas><figcaption>Close-up</figcaption></figure>' : ''}
         <button class="primary next">Next shot</button>
@@ -281,21 +312,25 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
     app.querySelector('.avg')!.textContent = averageText();
     app.querySelector('.aid')!.innerHTML = aidText();
     app.querySelector('.stage-tabs')!.innerHTML = stageTabs();
-    app.querySelectorAll<HTMLButtonElement>('[data-stage]').forEach((b) =>
-      b.addEventListener('click', () => {
-        stage = Number(b.dataset.stage) as Stage;
-        newShot();
-      }),
-    );
+    bindStageTabs(app);
     repaint(view);
     if (stage === 3) {
       const p = placed();
-      addView(reveal.querySelector('canvas')!, AIM_ASPECT, (c) =>
+      closeUp = addView(reveal.querySelector('canvas')!, AIM_ASPECT, (c) =>
         table.renderAim(c, p, { ghost: false, contact: false, lines: false, closeUp: true }, (eye, lw) =>
-          buildPlacementMarkings(shot, p, { contactAid: false, reveal: true, aimLine: false }, lw, eye),
+          buildPlacementMarkings(shot, p, { contactAid: false, reveal: true, aimLine: false, ...shownSets() }, lw, eye),
         ),
       );
     }
+    reveal.querySelectorAll<HTMLButtonElement>('[data-show]').forEach((b) =>
+      b.addEventListener('click', () => {
+        const k = b.dataset.show as keyof typeof revealShown;
+        revealShown[k] = !revealShown[k];
+        b.setAttribute('aria-pressed', String(revealShown[k]));
+        repaint(view);
+        if (closeUp) repaint(closeUp);
+      }),
+    );
     reveal.querySelector('.next')!.addEventListener('click', newShot);
     reveal.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }

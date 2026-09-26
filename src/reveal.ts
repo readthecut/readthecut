@@ -123,7 +123,7 @@ export function drawPlacement(
   canvas: HTMLCanvasElement,
   shot: Shot,
   placed: Candidate,
-  opts: { pocketLineAid: boolean; reveal: boolean },
+  opts: { pocketLineAid: boolean; reveal: boolean; showMine?: boolean; showCorrect?: boolean },
 ): { toTable: (x: number, y: number) => V2; toCanvas: (p: V2) => readonly [number, number] } {
   const { format } = shot.table;
   const { g, s, px, toTable, line, ball, obPath } = topDown(canvas, shot, [shot.cue, shot.object, shot.pocket.mouth]);
@@ -142,16 +142,17 @@ export function drawPlacement(
     const beyond = { x: shot.object.x - u.x * 4 * format.objectR, z: shot.object.z - u.z * 4 * format.objectR };
     line(shot.pocket.mouth, beyond, 'rgba(247, 245, 238, 0.55)', [6, 5], 1.5);
   }
-  line(shot.cue, placed.ghost, 'rgba(247, 245, 238, 0.8)', [6, 4]);
-  if (opts.reveal) {
-    line(shot.object, obPath(placed), placed.miss > 0 ? WRONG : CORRECT);
-    if (placed !== shot.correct) {
-      line(shot.object, obPath(shot.correct), CORRECT);
-      ball(shot.correct.ghost, format.cueR, 'rgba(74, 222, 128, 0.25)', CORRECT, false);
-    }
+  const mine = !opts.reveal || opts.showMine !== false;
+  const correct = opts.reveal && opts.showCorrect !== false;
+  if (mine) line(shot.cue, placed.ghost, 'rgba(247, 245, 238, 0.8)', [6, 4]);
+  if (opts.reveal && mine) line(shot.object, obPath(placed), placed.miss > 0 ? WRONG : CORRECT);
+  if (correct) {
+    line(shot.cue, shot.correct.ghost, 'rgba(74, 222, 128, 0.7)', [6, 4]);
+    line(shot.object, obPath(shot.correct), CORRECT);
+    ball(shot.correct.ghost, format.cueR, 'rgba(74, 222, 128, 0.25)', CORRECT, false);
   }
   ball(shot.cue, format.cueR, '#f7f5ee', null);
   ball(shot.object, format.objectR, objectColour(shot), null);
-  ball(placed.ghost, format.cueR, 'rgba(247, 245, 238, 0.35)', PLACED, false);
+  if (mine) ball(placed.ghost, format.cueR, 'rgba(247, 245, 238, 0.35)', PLACED, false);
   return { toTable, toCanvas: px };
 }
