@@ -217,11 +217,20 @@ function makeDistractors(
   return out;
 }
 
+/** Highest Cut Angle a generator version draws, for a Difficulty and pocket kind. */
+type MaxCut = (difficulty: Difficulty, kind: Pocket['kind']) => number;
+
+const tableMaxCut = (kind: Pocket['kind']) => (kind === 'side' ? MAX_SIDE_CUT : MAX_CUT);
+
+/** Generator v2 onward: Difficulty also limits the Cut Angle, so Easy stays close to straight. */
+export const DIFFICULTY_MAX_CUT: Record<Difficulty, number> = { easy: 30, medium: 60, hard: MAX_CUT };
+
 /**
- * Generator version 1. Frozen: shared Shot links and past Daily Shots replay
- * through this exact code (see docs/adr/0001). Changes go in a new version.
+ * Shared body of every generator version. Each released version is frozen:
+ * Shot Links and past Dailies replay through it (see docs/adr/0001), and the
+ * `keep generator v… stable` tests pin its output. Changes go in a new version.
  */
-function generateShotV1(formatId: FormatId, difficulty: Difficulty, rng: Rng): Shot {
+function buildShot(formatId: FormatId, difficulty: Difficulty, rng: Rng, maxCutFor: MaxCut): Shot {
   const table = tableFor(formatId);
   const { objectR, cueR } = table.format;
   for (let attempt = 0; attempt < 5000; attempt++) {
@@ -234,7 +243,7 @@ function generateShotV1(formatId: FormatId, difficulty: Difficulty, rng: Rng): S
     // Require a window of at least ~1cm at the mouth, so the shot is genuinely makeable.
     if (!win || (win.hi - win.lo) * toPocket < 0.01) continue;
 
-    const maxCut = pocket.kind === 'side' ? MAX_SIDE_CUT : MAX_CUT;
+    const maxCut = maxCutFor(difficulty, pocket.kind);
     // Pick a band first so every Cut Angle Band gets practised evenly.
     const bands = Math.ceil(maxCut / BAND_SIZE);
     const band = Math.floor(rng() * bands);
@@ -275,9 +284,12 @@ function generateShotV1(formatId: FormatId, difficulty: Difficulty, rng: Rng): S
 }
 
 export const GENERATORS: Record<number, (f: FormatId, d: Difficulty, rng: Rng) => Shot> = {
-  1: generateShotV1,
+  // v1: every Difficulty draws the full Cut Angle range.
+  1: (f, d, rng) => buildShot(f, d, rng, (_, kind) => tableMaxCut(kind)),
+  // v2: Difficulty caps the Cut Angle (Easy 30°, Medium 60°, Hard 75°).
+  2: (f, d, rng) => buildShot(f, d, rng, (diff, kind) => Math.min(DIFFICULTY_MAX_CUT[diff], tableMaxCut(kind))),
 };
-export const CURRENT_GENERATOR = 1;
+export const CURRENT_GENERATOR = 2;
 
 export function generateShot(formatId: FormatId, difficulty: Difficulty, rng: Rng, version = CURRENT_GENERATOR): Shot {
   const gen = GENERATORS[version];

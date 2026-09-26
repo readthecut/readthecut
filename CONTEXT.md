@@ -66,6 +66,10 @@ _Avoid_: Result, explanation
 
 ### Practice
 
+**Difficulty**:
+Easy, Medium or Hard. It sets the largest Cut Angle a Shot can have and how narrowly the nearest Distractor misses.
+_Avoid_: Level, mode
+
 **Set**:
 A run of 10 questions with a score at the end.
 _Avoid_: Round, quiz, session

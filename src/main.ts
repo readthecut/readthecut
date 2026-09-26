@@ -14,7 +14,7 @@ import {
   type Outcome,
 } from './daily';
 import { FORMAT_IDS, FORMATS, type FormatId } from './formats';
-import { BAND_COUNT, BAND_SIZE, bandOf, missKind, type Difficulty, type Shot } from './geometry';
+import { BAND_COUNT, BAND_SIZE, DIFFICULTY_MAX_CUT, bandOf, missKind, type Difficulty, type Shot } from './geometry';
 import { freshKey, keyFromLocation, share, shotFromKey, shotLink, siteUrl, type ShotKey } from './links';
 import { drawReveal } from './reveal';
 import { TableScene } from './scene';
@@ -210,7 +210,11 @@ function showHome() {
           ${DIFFICULTIES.map((d) => `<button role="radio" aria-checked="${d === difficulty}" data-d="${d}">${cap(d)}</button>`).join('')}
         </div>
         <p class="hint">${
-          { easy: 'Wrong Choices miss by a ball-width or more.', medium: 'The closest wrong Choice misses by about half a ball.', hard: 'The closest wrong Choice just catches the jaw.' }[difficulty]
+          {
+            easy: `Near-straight shots, cuts up to ${DIFFICULTY_MAX_CUT.easy}°. Wrong Choices miss by a ball-width or more.`,
+            medium: `Cuts up to ${DIFFICULTY_MAX_CUT.medium}°. The closest wrong Choice misses by about half a ball.`,
+            hard: `Cuts up to ${DIFFICULTY_MAX_CUT.hard}°, including thin ones. The closest wrong Choice just catches the jaw.`,
+          }[difficulty]
         }</p>
         <div class="actions">
           <button class="primary" data-start="set">Start a Set of ${SET_LENGTH}</button>

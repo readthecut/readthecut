@@ -11,7 +11,10 @@ export const DAILY_EPOCH = '2026-09-25';
  * Generator version per Daily date range, newest last. A new generator only
  * applies from the day after it ships, so a Daily never changes mid-day.
  */
-const DAILY_GENERATORS: { from: string; version: number }[] = [{ from: DAILY_EPOCH, version: 1 }];
+const DAILY_GENERATORS: { from: string; version: number }[] = [
+  { from: DAILY_EPOCH, version: 1 },
+  { from: '2026-09-27', version: 2 },
+];
 
 export type Outcome = 'correct' | 'over' | 'under';
 

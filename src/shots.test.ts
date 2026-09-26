@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { dailyKeys, dailyNumber, shareText } from './daily';
 import { FORMAT_IDS } from './formats';
-import { MAX_CUT, dist, missKind, onTable, type Difficulty } from './geometry';
+import { DIFFICULTY_MAX_CUT, MAX_CUT, dist, missKind, onTable, type Difficulty } from './geometry';
 import { decodeKey, encodeKey, freshKey, shotFromKey } from './links';
 
 describe('generateShot', () => {
@@ -17,6 +17,7 @@ describe('generateShot', () => {
           expect(s.choices[s.correctIndex]).toBe(s.correct);
           expect(s.correct.miss).toBe(0);
           expect(s.cutDeg).toBeLessThanOrEqual(s.pocket.kind === 'side' ? 45 : MAX_CUT);
+          expect(s.cutDeg).toBeLessThanOrEqual(DIFFICULTY_MAX_CUT[difficulty] + 1e-9);
           // The ghost ball touches the object ball.
           expect(dist(s.correct.ghost, s.object)).toBeCloseTo(objectR + cueR, 9);
           for (const c of s.choices) {
@@ -50,12 +51,21 @@ describe('Shot Links', () => {
     expect(decodeKey('1.us9.m.<script>')).toBeNull();
   });
 
-  // Pins generator v1's output. If this fails, a change altered old links: put it in a new version instead.
-  it('keep generator v1 stable', () => {
-    const s = shotFromKey({ version: 1, format: 'us9', difficulty: 'medium', seed: 'pinned1' });
-    expect(s.cue.x).toMatchSnapshot();
-    expect(s.cue.z).toMatchSnapshot();
-    expect(s.correctIndex).toMatchSnapshot();
+  // Pin each released generator's output. If one fails, a change altered old links: put it in a new version instead.
+  for (const version of [1, 2]) {
+    it(`keep generator v${version} stable`, () => {
+      const s = shotFromKey({ version, format: 'us9', difficulty: 'medium', seed: 'pinned1' });
+      expect(s.cue.x).toMatchSnapshot();
+      expect(s.cue.z).toMatchSnapshot();
+      expect(s.correctIndex).toMatchSnapshot();
+    });
+  }
+
+  it('v1 still draws the full cut range on Easy', () => {
+    const cuts = Array.from({ length: 300 }, (_, i) =>
+      shotFromKey({ version: 1, format: 'us9', difficulty: 'easy', seed: `v1easy${i}` }).cutDeg,
+    );
+    expect(Math.max(...cuts)).toBeGreaterThan(DIFFICULTY_MAX_CUT.easy);
   });
 });
 
@@ -67,6 +77,11 @@ describe('Daily', () => {
     const b = dailyKeys('2026-10-01').map((k) => shotFromKey(k).cue);
     expect(a).toHaveLength(5);
     expect(b).toEqual(a);
+  });
+
+  it('switches to generator v2 from 2026-09-27 only', () => {
+    expect(dailyKeys('2026-09-26').every((k) => k.version === 1)).toBe(true);
+    expect(dailyKeys('2026-09-27').every((k) => k.version === 2)).toBe(true);
   });
 
   it('shares an emoji grid without spoilers', () => {

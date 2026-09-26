@@ -5,3 +5,9 @@ exports[`Shot Links > keep generator v1 stable 1`] = `0.23202189875946588`;
 exports[`Shot Links > keep generator v1 stable 2`] = `0.04061268840407144`;
 
 exports[`Shot Links > keep generator v1 stable 3`] = `1`;
+
+exports[`Shot Links > keep generator v2 stable 1`] = `0.2183440768321912`;
+
+exports[`Shot Links > keep generator v2 stable 2`] = `-0.06095855491747722`;
+
+exports[`Shot Links > keep generator v2 stable 3`] = `1`;
