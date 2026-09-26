@@ -677,3 +677,38 @@ body.playing .about {
 .overlay-toggles button .key {
   margin: 0 6px 0 0;
 }
+
+/* ---------- trainer stage 3: wide view, controls underneath ---------- */
+
+@media (min-width: 960px) {
+  .play.learn.wide {
+    grid-template-columns: 1fr;
+  }
+}
+/* As wide as the page, but never so tall that the control bar drops off screen. */
+.learn.wide .learn-view figure {
+  max-width: calc((100vh - 190px) * 16 / 9);
+  margin: 0 auto;
+}
+.learn.wide .nudge {
+  max-width: calc((100vh - 190px) * 16 / 9);
+  margin: 10px auto 0;
+}
+.learn.wide .nudge .lock {
+  flex: 2;
+  width: auto;
+  margin-top: 0;
+}
+.learn.wide .learn-side {
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+  text-align: center;
+}
+.learn.wide .stage-tabs {
+  justify-content: center;
+}
+.learn.wide .reveal {
+  text-align: left;
+  margin-top: 0;
+}

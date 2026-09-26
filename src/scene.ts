@@ -9,7 +9,9 @@ const RAIL_W = 0.13;
 const RAIL_H = 0.046;
 const STANDING_EYE = 1.6 - 0.76; // eye height minus table height
 const STANDING_BACK = 0.9;
-const CUE_ELEVATION = (4 * Math.PI) / 180;
+const CUE_ELEVATION = (4 * Math.PI) / 180; // a normal stance, cue nearly level
+const MAX_CUE_ELEVATION = (30 * Math.PI) / 180;
+const CUE_CLEARANCE = 0.011; // shaft radius near the tip (~7 mm), plus a few mm of air
 const CUE_GAP = 0.015; // tip to cue ball
 const AIM_EYE_BACK = 0.35; // along the cue, behind the cue ball
 const AIM_EYE_ABOVE_CUE = 0.11;
@@ -481,8 +483,9 @@ export class TableScene {
   renderAim(target: HTMLCanvasElement, choice: Candidate, layers?: OverlayLayers, extra?: ExtraMarkings) {
     const s = this.shot!;
     const a = { x: Math.cos(choice.aimDir), z: Math.sin(choice.aimDir) };
-    const cos = Math.cos(CUE_ELEVATION);
-    const sin = Math.sin(CUE_ELEVATION);
+    const elevation = this.cueElevation();
+    const cos = Math.cos(elevation);
+    const sin = Math.sin(elevation);
     const back = new THREE.Vector3(-a.x * cos, sin, -a.z * cos); // from tip toward butt
     const cueR = s.table.format.cueR;
     const centre = new THREE.Vector3(s.cue.x, cueR, s.cue.z);
@@ -512,7 +515,14 @@ export class TableScene {
     } else {
       // FOV is fixed for the thumbnail's 4:3 shape, so a taller canvas is a magnified crop, not a wider view.
       this.camera.fov = this.aimFov(AIM_FOV_ASPECT);
-      this.camera.lookAt(centre.x + a.x * lookDist, cueR, centre.z + a.z * lookDist);
+      // Pitch: down to the aim point, or further if a raised cue lifts the eye enough to lose the
+      // cue ball off the bottom of the frame. Depends only on the Shot, so every Choice shares it.
+      const halfFov = (this.camera.fov * Math.PI) / 360;
+      const flat = (x: number, z: number) => Math.hypot(x - eye.x, z - eye.z);
+      const toAim = Math.atan2(eye.y - cueR, flat(centre.x + a.x * lookDist, centre.z + a.z * lookDist));
+      const toBallFoot = Math.atan2(eye.y, Math.max(0.01, flat(s.cue.x, s.cue.z) - cueR));
+      const pitch = Math.max(toAim, toBallFoot - halfFov + (4 * Math.PI) / 180);
+      this.camera.lookAt(eye.x + a.x * Math.cos(pitch), eye.y - Math.sin(pitch), eye.z + a.z * Math.cos(pitch));
     }
 
     const lineWidth = Math.max(1.5, target.height / (layers?.closeUp ? 220 : 300));
@@ -545,6 +555,34 @@ export class TableScene {
   project(p: THREE.Vector3, target: HTMLCanvasElement): { x: number; y: number } {
     const v = p.clone().project(this.camera);
     return { x: ((v.x + 1) / 2) * target.width, y: ((1 - v.y) / 2) * target.height };
+  }
+
+  /**
+   * Cue elevation for this Shot. Normally a nearly level 4°, but raised to clear
+   * the cushion and rail behind the cue ball, as a player bridging on the rail
+   * would. Taken from the correct aim and shared by every Aim View of the Shot,
+   * so the camera's tilt never differs between Choices or hints at the answer.
+   */
+  private cueElevation(): number {
+    const s = this.shot!;
+    const { cueR } = s.table.format;
+    const back = { x: -Math.cos(s.correct.aimDir), z: -Math.sin(s.correct.aimDir) };
+    // Distance from the cue ball's centre, backwards along the cue, to a rectangle's edge.
+    const exit = (hx: number, hz: number) => {
+      const tx = back.x > 0 ? (hx - s.cue.x) / back.x : back.x < 0 ? (-hx - s.cue.x) / back.x : Infinity;
+      const tz = back.z > 0 ? (hz - s.cue.z) / back.z : back.z < 0 ? (-hz - s.cue.z) / back.z : Infinity;
+      return Math.min(tx, tz);
+    };
+    const { halfL, halfW } = s.table;
+    let e = CUE_ELEVATION;
+    for (const [t, height] of [
+      [exit(halfL, halfW), CUSHION_H],
+      // Each obstacle's nearest edge is where the cue is lowest over it.
+      [exit(halfL + CUSHION_W, halfW + CUSHION_W), RAIL_H],
+    ] as const) {
+      if (t > 0.01) e = Math.max(e, Math.atan((height + CUE_CLEARANCE - cueR) / t));
+    }
+    return Math.min(e, MAX_CUE_ELEVATION);
   }
 
   /** Show or hide the ring on the called pocket (drills that aren't about a pocket hide it). */

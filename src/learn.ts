@@ -40,10 +40,12 @@ const DRAG_GEARING = 4;
 const TOP_DOWN_ASPECT = 16 / 10;
 const STANDING_ASPECT = 16 / 10;
 const AIM_ASPECT = 4 / 3;
+/** Stage 3 is wide: a landscape view at full width is closer to what you see down on a shot. */
+const WIDE_AIM_ASPECT = 16 / 9;
 const REFERENCE_SET = 10;
 
 /** Which sets of markings to show after locking in. Both come back on at every lock-in, so you always see your result first. */
-const revealShown = { mine: true, correct: true };
+const revealShown = { mine: true, correct: true, closeUp: false };
 
 /** One key handler at a time for these screens, removed when leaving them. */
 let keyHandler: ((e: KeyboardEvent) => void) | null = null;
@@ -78,7 +80,6 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
   /** Stages whose answer has been shown for this shot: a repeat in another stage isn't scored. */
   let revealedIn = new Set<Stage>();
   let view: View;
-  let closeUp: View | null = null;
   // Drag calibration, refreshed after each render.
   let toTable: ((x: number, y: number) => { x: number; z: number }) | null = null;
   let pxPerRad = 0;
@@ -117,7 +118,9 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
       );
       calibrate(c);
     } else {
-      table.renderAim(c, p, undefined, (eye, lw) =>
+      // After locking in, Close-up magnifies this same view rather than adding a second one.
+      const closeUpLayers = { ghost: false, contact: false, lines: false, closeUp: answered && revealShown.closeUp };
+      table.renderAim(c, p, closeUpLayers, (eye, lw) =>
         buildPlacementMarkings(shot, p, { contactAid: false, reveal: answered, aimLine: false, ...shownSets() }, lw, eye),
       );
       calibrate(c);
@@ -181,8 +184,16 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
     );
 
   function build() {
-    const aspect = stage === 1 ? TOP_DOWN_ASPECT : stage === 2 ? STANDING_ASPECT : AIM_ASPECT;
-    const screen = h(`<main class="play learn">
+    const aspect = stage === 1 ? TOP_DOWN_ASPECT : stage === 2 ? STANDING_ASPECT : WIDE_AIM_ASPECT;
+    // Stage 3 puts the controls in a bar under a full-width view; the others keep them beside it.
+    const wide = stage === 3;
+    const controls = `<div class="nudge">
+          <button data-nudge="-1" aria-label="Nudge left 0.5°">◀ 0.5°</button>
+          ${wide ? '<button class="primary lock">Lock in</button>' : ''}
+          <button data-nudge="1" aria-label="Nudge right 0.5°">0.5° ▶</button>
+        </div>
+        ${wide ? '' : '<button class="primary lock">Lock in</button>'}`;
+    const screen = h(`<main class="play learn${wide ? ' wide' : ''}">
       <header class="bar">
         <button class="link" data-home>← Home</button>
         <span>Stage ${stage}/3 · ${STAGES[stage].view}</span>
@@ -190,6 +201,7 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
       </header>
       <section class="learn-view">
         <figure><canvas class="drag" aria-label="${STAGES[stage].view}: drag to move the ghost ball"></canvas></figure>
+        ${wide ? controls : ''}
       </section>
       <section class="learn-side">
         <div class="stage-tabs" role="group" aria-label="Stage">${stageTabs()}</div>
@@ -199,11 +211,7 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
             : 'Drag the white ghost ball round the object ball until it would send the object ball into the ringed pocket.'
         }</p>
         <p class="aid">${aidText()}</p>
-        <div class="nudge">
-          <button data-nudge="-1" aria-label="Nudge left 0.5°">◀ 0.5°</button>
-          <button data-nudge="1" aria-label="Nudge right 0.5°">0.5° ▶</button>
-        </div>
-        <button class="primary lock">Lock in</button>
+        ${wide ? '' : controls}
         <div class="reveal" hidden></div>
       </section>
     </main>`);
@@ -212,7 +220,6 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
     table.showPocketMarker(true);
     table.setShot(shot);
     resetViews();
-    closeUp = null;
     const canvas = screen.querySelector<HTMLCanvasElement>('.learn-view canvas')!;
     view = addView(canvas, aspect, render);
 
@@ -221,7 +228,7 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
     screen.querySelectorAll<HTMLButtonElement>('[data-nudge]').forEach((b) =>
       b.addEventListener('click', () => nudge(Number(b.dataset.nudge))),
     );
-    screen.querySelector('.lock')!.addEventListener('click', lockIn);
+    screen.querySelector('.lock')!.addEventListener('click', () => (answered ? newShot() : lockIn()));
 
     // Drag: top-down follows the pointer round the ball; the 3D views map sideways movement to the ghost ball.
     let drag: { x: number; from: Placement; perRad: number } | null = null;
@@ -266,6 +273,7 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
     answered = true;
     revealShown.mine = true;
     revealShown.correct = true;
+    revealShown.closeUp = false;
     const a = assess(shot, placement);
     // Once the answer has been seen in one Stage, placing the same shot in another is much easier.
     const scored = revealedIn.size === 0;
@@ -302,36 +310,30 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
         <div class="overlay-toggles" role="group" aria-label="Show">
           <button data-show="mine" aria-pressed="${revealShown.mine}"><span class="key placed"></span>Your ghost ball &amp; path</button>
           <button data-show="correct" aria-pressed="${revealShown.correct}"><span class="key good"></span>Correct ghost ball &amp; path</button>
+          ${stage === 3 ? `<button data-show="closeUp" aria-pressed="${revealShown.closeUp}">Close-up</button>` : ''}
         </div>
         ${change ? `<p class="announce">${announce[change]}</p>` : ''}
-        ${stage === 3 ? '<figure class="closeup"><canvas aria-label="Close-up of your ghost ball and the correct one"></canvas><figcaption>Close-up</figcaption></figure>' : ''}
-        <button class="primary next">Next shot</button>
+        ${stage === 3 ? '' : '<button class="primary next">Next shot</button>'}
       </div>`),
     );
-    app.querySelector<HTMLButtonElement>('.lock')!.hidden = true;
+    const lock = app.querySelector<HTMLButtonElement>('.lock')!;
+    // Stage 3 keeps its button in the control bar and turns it into Next shot; the others hide it.
+    if (stage === 3) lock.textContent = 'Next shot';
+    else lock.hidden = true;
     app.querySelector('.avg')!.textContent = averageText();
     app.querySelector('.aid')!.innerHTML = aidText();
     app.querySelector('.stage-tabs')!.innerHTML = stageTabs();
     bindStageTabs(app);
     repaint(view);
-    if (stage === 3) {
-      const p = placed();
-      closeUp = addView(reveal.querySelector('canvas')!, AIM_ASPECT, (c) =>
-        table.renderAim(c, p, { ghost: false, contact: false, lines: false, closeUp: true }, (eye, lw) =>
-          buildPlacementMarkings(shot, p, { contactAid: false, reveal: true, aimLine: false, ...shownSets() }, lw, eye),
-        ),
-      );
-    }
     reveal.querySelectorAll<HTMLButtonElement>('[data-show]').forEach((b) =>
       b.addEventListener('click', () => {
         const k = b.dataset.show as keyof typeof revealShown;
         revealShown[k] = !revealShown[k];
         b.setAttribute('aria-pressed', String(revealShown[k]));
         repaint(view);
-        if (closeUp) repaint(closeUp);
       }),
     );
-    reveal.querySelector('.next')!.addEventListener('click', newShot);
+    reveal.querySelector('.next')?.addEventListener('click', newShot);
     reveal.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
