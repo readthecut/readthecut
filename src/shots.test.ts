@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { dailyKeys, dailyNumber, shareText } from './daily';
 import { FORMAT_IDS } from './formats';
-import { DIFFICULTY_MAX_CUT, MAX_CUT, dist, missKind, onTable, type Difficulty } from './geometry';
+import { DIFFICULTY_MAX_CUT, MAX_CUT, dist, missKind, onTable, stunScratch, type Difficulty } from './geometry';
 import { decodeKey, encodeKey, freshKey, shotFromKey } from './links';
 
 describe('generateShot', () => {
@@ -18,6 +18,7 @@ describe('generateShot', () => {
           expect(s.correct.miss).toBe(0);
           expect(s.cutDeg).toBeLessThanOrEqual(s.pocket.kind === 'side' ? 45 : MAX_CUT);
           expect(s.cutDeg).toBeLessThanOrEqual(DIFFICULTY_MAX_CUT[difficulty] + 1e-9);
+          expect(stunScratch(s.table, s.correct)).toBeNull();
           // The ghost ball touches the object ball.
           expect(dist(s.correct.ghost, s.object)).toBeCloseTo(objectR + cueR, 9);
           for (const c of s.choices) {
@@ -60,6 +61,13 @@ describe('Shot Links', () => {
       expect(s.correctIndex).toMatchSnapshot();
     });
   }
+
+  it('v1 still includes stun-scratch shots', () => {
+    const scratches = Array.from({ length: 400 }, (_, i) =>
+      shotFromKey({ version: 1, format: 'us9', difficulty: 'medium', seed: `v1scr${i}` }),
+    ).filter((s) => stunScratch(s.table, s.correct));
+    expect(scratches.length).toBeGreaterThan(0);
+  });
 
   it('v1 still draws the full cut range on Easy', () => {
     const cuts = Array.from({ length: 300 }, (_, i) =>

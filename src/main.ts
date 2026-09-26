@@ -14,7 +14,7 @@ import {
   type Outcome,
 } from './daily';
 import { FORMAT_IDS, FORMATS, type FormatId } from './formats';
-import { BAND_COUNT, BAND_SIZE, DIFFICULTY_MAX_CUT, bandOf, missKind, type Difficulty, type Shot } from './geometry';
+import { BAND_COUNT, BAND_SIZE, DIFFICULTY_MAX_CUT, MIN_TANGENT_CUT, bandOf, missKind, stunScratch, type Difficulty, type Shot } from './geometry';
 import { freshKey, keyFromLocation, share, shotFromKey, shotLink, siteUrl, type ShotKey } from './links';
 import { drawReveal } from './reveal';
 import { TableScene } from './scene';
@@ -415,6 +415,7 @@ function lockIn() {
     verdict = `${how}. It misses the pocket by ${cm} cm, about ${balls} ball-widths.`;
   }
 
+  const scratch = stunScratch(shot.table, shot.correct);
   const reveal = app.querySelector<HTMLElement>('.reveal')!;
   reveal.hidden = false;
   reveal.replaceChildren(
@@ -422,7 +423,10 @@ function lockIn() {
       <p class="verdict ${correct ? 'good' : 'bad'}"><strong>${correct ? 'Correct' : 'Miss'}</strong> · ${verdict}</p>
       <p class="facts">Cut Angle <strong>${shot.cutDeg.toFixed(1)}°</strong> · answered in ${(ms / 1000).toFixed(1)}s</p>
       <canvas class="diagram" width="1200" height="640" aria-label="Top-down diagram"></canvas>
-      <p class="legend"><span class="key good"></span>Correct line and ghost ball ${correct ? '' : '<span class="key bad"></span>Your line'}</p>
+      <p class="legend"><span class="key good"></span>Correct line and ghost ball ${correct ? '' : '<span class="key bad"></span>Your line'}${
+        shot.cutDeg >= MIN_TANGENT_CUT ? `<span class="key tangent${scratch ? ' scratch' : ''}"></span>Cue ball after contact (stun)` : ''
+      }</p>
+      ${scratch ? `<p class="scratch-note">A stun shot scratches in the ${scratch.kind} pocket here, so play it with follow or draw.</p>` : ''}
       ${
         correct
           ? ''

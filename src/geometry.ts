@@ -168,6 +168,42 @@ export function missKind(shot: Shot, c: Candidate): 'correct' | 'over' | 'under'
   return c.cutDeg > shot.correct.cutDeg ? 'over' : 'under';
 }
 
+// ---------- cue ball after contact ----------
+
+/** Below this cut, a stunned cue ball all but stops dead, so its Tangent Line doesn't matter. */
+export const MIN_TANGENT_CUT = 5;
+
+/** Direction of the Tangent Line: where a stunned cue ball goes after contact, 90° off the object ball's path. */
+export function tangentDir(c: Candidate): number {
+  const side = Math.sign(wrap(c.aimDir - c.obDir)) || 1;
+  return c.obDir + (side * Math.PI) / 2;
+}
+
+/** The pocket a stunned cue ball would roll straight into after `c`'s contact, if any. */
+export function stunScratch(table: Table, c: Candidate): Pocket | null {
+  if (c.cutDeg < MIN_TANGENT_CUT) return null;
+  const t = tangentDir(c);
+  for (const p of table.pockets) {
+    const w = pocketWindow(c.ghost, p, table.format.cueR);
+    if (!w) continue;
+    const centre = (w.lo + w.hi) / 2;
+    const a = centre + wrap(t - centre);
+    if (a >= w.lo && a <= w.hi) return p;
+  }
+  return null;
+}
+
+/** Where the Tangent Line ends: the pocket it drops into, or the first cushion it reaches. */
+export function tangentEnd(table: Table, c: Candidate): V2 {
+  const p = stunScratch(table, c);
+  if (p) return p.mouth;
+  const u = dir(tangentDir(c));
+  const r = table.format.cueR;
+  const tx = u.x > 0 ? (table.halfL - r - c.ghost.x) / u.x : u.x < 0 ? (-table.halfL + r - c.ghost.x) / u.x : Infinity;
+  const tz = u.z > 0 ? (table.halfW - r - c.ghost.z) / u.z : u.z < 0 ? (-table.halfW + r - c.ghost.z) / u.z : Infinity;
+  return add(c.ghost, scale(u, Math.max(0, Math.min(tx, tz))));
+}
+
 // ---------- shot generation ----------
 
 const between = (rng: Rng, a: number, b: number) => a + (b - a) * rng();
@@ -217,8 +253,13 @@ function makeDistractors(
   return out;
 }
 
-/** Highest Cut Angle a generator version draws, for a Difficulty and pocket kind. */
-type MaxCut = (difficulty: Difficulty, kind: Pocket['kind']) => number;
+/** What distinguishes one generator version from another. */
+interface Rules {
+  /** Highest Cut Angle drawn, for a Difficulty and pocket kind. */
+  maxCut: (difficulty: Difficulty, kind: Pocket['kind']) => number;
+  /** Skip shots whose stunned cue ball would scratch along the Tangent Line. */
+  rejectStunScratch: boolean;
+}
 
 const tableMaxCut = (kind: Pocket['kind']) => (kind === 'side' ? MAX_SIDE_CUT : MAX_CUT);
 
@@ -230,7 +271,7 @@ export const DIFFICULTY_MAX_CUT: Record<Difficulty, number> = { easy: 30, medium
  * Shot Links and past Dailies replay through it (see docs/adr/0001), and the
  * `keep generator v… stable` tests pin its output. Changes go in a new version.
  */
-function buildShot(formatId: FormatId, difficulty: Difficulty, rng: Rng, maxCutFor: MaxCut): Shot {
+function buildShot(formatId: FormatId, difficulty: Difficulty, rng: Rng, rules: Rules): Shot {
   const table = tableFor(formatId);
   const { objectR, cueR } = table.format;
   for (let attempt = 0; attempt < 5000; attempt++) {
@@ -243,7 +284,7 @@ function buildShot(formatId: FormatId, difficulty: Difficulty, rng: Rng, maxCutF
     // Require a window of at least ~1cm at the mouth, so the shot is genuinely makeable.
     if (!win || (win.hi - win.lo) * toPocket < 0.01) continue;
 
-    const maxCut = maxCutFor(difficulty, pocket.kind);
+    const maxCut = rules.maxCut(difficulty, pocket.kind);
     // Pick a band first so every Cut Angle Band gets practised evenly.
     const bands = Math.ceil(maxCut / BAND_SIZE);
     const band = Math.floor(rng() * bands);
@@ -258,6 +299,7 @@ function buildShot(formatId: FormatId, difficulty: Difficulty, rng: Rng, maxCutF
 
     const correct = candidateFor(table, cue, ob, pocket, win, obDir);
     if (!correct) continue;
+    if (rules.rejectStunScratch && stunScratch(table, correct)) continue;
     const distractors = makeDistractors(rng, table, cue, ob, pocket, win, difficulty);
     if (!distractors) continue;
 
@@ -285,9 +327,13 @@ function buildShot(formatId: FormatId, difficulty: Difficulty, rng: Rng, maxCutF
 
 export const GENERATORS: Record<number, (f: FormatId, d: Difficulty, rng: Rng) => Shot> = {
   // v1: every Difficulty draws the full Cut Angle range.
-  1: (f, d, rng) => buildShot(f, d, rng, (_, kind) => tableMaxCut(kind)),
-  // v2: Difficulty caps the Cut Angle (Easy 30°, Medium 60°, Hard 75°).
-  2: (f, d, rng) => buildShot(f, d, rng, (diff, kind) => Math.min(DIFFICULTY_MAX_CUT[diff], tableMaxCut(kind))),
+  1: (f, d, rng) => buildShot(f, d, rng, { maxCut: (_, kind) => tableMaxCut(kind), rejectStunScratch: false }),
+  // v2: Difficulty caps the Cut Angle (Easy 30°, Medium 60°, Hard 75°), and no stun-shot scratches.
+  2: (f, d, rng) =>
+    buildShot(f, d, rng, {
+      maxCut: (diff, kind) => Math.min(DIFFICULTY_MAX_CUT[diff], tableMaxCut(kind)),
+      rejectStunScratch: true,
+    }),
 };
 export const CURRENT_GENERATOR = 2;
 

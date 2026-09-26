@@ -1,8 +1,10 @@
 import { objectColour } from './scene';
-import { dir, dist, type Candidate, type Shot, type V2 } from './geometry';
+import { MIN_TANGENT_CUT, dir, dist, stunScratch, tangentEnd, type Candidate, type Shot, type V2 } from './geometry';
 
 const CORRECT = '#4ade80';
 const WRONG = '#f87171';
+const TANGENT = 'rgba(247, 245, 238, 0.7)';
+export const SCRATCH = '#ffc94d';
 
 /** Top-down diagram of the Shot: the correct line, the chosen line and where each sends the object ball. */
 export function drawReveal(canvas: HTMLCanvasElement, shot: Shot, chosen: Candidate) {
@@ -61,6 +63,12 @@ export function drawReveal(canvas: HTMLCanvasElement, shot: Shot, chosen: Candid
     const u = dir(c.obDir);
     return { x: shot.object.x + u.x * d, z: shot.object.z + u.z * d };
   };
+
+  // Tangent Line of the correct shot: where a stunned cue ball goes after contact.
+  if (shot.correct.cutDeg >= MIN_TANGENT_CUT) {
+    const scratch = stunScratch(shot.table, shot.correct);
+    line(shot.correct.ghost, tangentEnd(shot.table, shot.correct), scratch ? SCRATCH : TANGENT, [2, 4], 1.5);
+  }
 
   const isCorrect = chosen === shot.correct;
   if (!isCorrect) {

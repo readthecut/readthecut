@@ -26,6 +26,14 @@ _Avoid_: Contact position
 The point the cue is aimed at: the centre of the Ghost Ball as seen down the cue.
 _Avoid_: Target, aim spot
 
+**Tangent Line**:
+The path a cue ball hit with no spin (stun) takes after contact, at 90° to the object ball's path.
+_Avoid_: Cue ball path, 90° line
+
+**Stun Scratch**:
+A Shot whose Tangent Line runs straight into a pocket, so a stunned cue ball would be pocketed.
+_Avoid_: Scratch shot, foul
+
 **Throw**:
 The small sideways push that friction between the balls gives the object ball at contact. It is ignored for now: "correct" means pure geometry.
 _Avoid_: Correction, deflection
