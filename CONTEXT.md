@@ -39,8 +39,12 @@ A Shot whose Tangent Line runs straight into a pocket, so a stunned cue ball wou
 _Avoid_: Scratch shot, foul
 
 **Throw**:
-The small sideways push that friction between the balls gives the object ball at contact. It is ignored for now: "correct" means pure geometry.
+The small sideways push that friction between the balls gives the object ball at contact, turning it off the line of centres toward the cue ball's path. Only cut-induced throw is modelled, with no sidespin, and only when a Stroke other than Geometry is chosen.
 _Avoid_: Correction, deflection
+
+**Stroke**:
+How the cue ball arrives at contact, which sets the Throw: Geometry (none), Slow stun (sliding, about 1 mph) or Firm roll (rolling, about 7 mph). It is chosen before a Set, and stats are kept separately for each Stroke.
+_Avoid_: Shot type, physics mode, speed
 
 **Overcut**:
 A miss from hitting the object ball too thin, so it turns more than the Cut Angle needs.

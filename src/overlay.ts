@@ -15,6 +15,7 @@ export interface OverlayLayers {
 const GOOD = '#4ade80';
 const BAD = '#f87171';
 const AIM = '#f7f5ee';
+const GEOMETRIC = '#7dd3fc';
 
 /**
  * The Aim Overlay for one Aim View, built in table space from the same
@@ -106,6 +107,8 @@ export function buildAimOverlay(
   if (layers.ghost) {
     ghost(view, viewColour);
     if (!isCorrect) ghost(correct, GOOD);
+    // With throw: where a pure ghost-ball aim would put the cue ball. The gap to green is the throw allowance.
+    if (shot.geometric) ghost(shot.geometric, GEOMETRIC);
   }
   if (layers.contact) {
     contact(view, viewColour);

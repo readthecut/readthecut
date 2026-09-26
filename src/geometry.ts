@@ -2,6 +2,7 @@
 // table centre: x along the length, z along the width (matches three.js XZ).
 
 import { FORMATS, type FormatId, type TableFormat } from './formats';
+import { strokeThrow, type Stroke } from './physics';
 import type { Rng } from './rng';
 
 export interface V2 {
@@ -34,10 +35,12 @@ export interface Window {
 }
 
 export interface Candidate {
-  obDir: number; // direction the object ball leaves in
+  obDir: number; // direction the object ball actually leaves in, after any throw
+  lineOfCentres: number; // direction from the ghost ball through the object ball at contact
   ghost: V2;
   aimDir: number; // direction the cue ball is sent in
-  cutDeg: number;
+  cutDeg: number; // geometric cut: between the aim and the line of centres
+  throwDeg: number; // how far throw turns the object ball off the line of centres
   miss: number; // metres outside the pocket window at the mouth; 0 = pocketed
 }
 
@@ -49,7 +52,10 @@ export interface Shot {
   objectSpin: [number, number, number]; // rotation of the object ball, for looks only
   pocket: Pocket;
   window: Window;
+  stroke: Stroke;
   correct: Candidate;
+  /** With throw: the pure ghost-ball aim at the pocket, and what throw does to it. Null for Geometry. */
+  geometric: Candidate | null;
   choices: Candidate[]; // four, shuffled; includes `correct`
   correctIndex: number;
   cutDeg: number;
@@ -142,7 +148,47 @@ export function missDistance(ob: V2, pocket: Pocket, win: Window, obDir: number)
   return 0;
 }
 
-/** Build the cue-ball aim that sends the object ball along `obDir`, or null if the cut is unplayable. */
+/**
+ * The aim whose contact has line of centres `centres`, and where throw then
+ * sends the object ball. Null if the cut is unplayable.
+ */
+export function aimForCentres(
+  table: Table,
+  cue: V2,
+  ob: V2,
+  pocket: Pocket,
+  win: Window,
+  centres: number,
+  stroke: Stroke,
+): Candidate | null {
+  const { objectR, cueR } = table.format;
+  const ghost = sub(ob, scale(dir(centres), objectR + cueR));
+  const travel = sub(ghost, cue);
+  if (len(travel) < 0.05) return null;
+  const aimDir = angleOf(travel);
+  const signedCut = wrap(centres - aimDir);
+  const cutDeg = (Math.abs(signedCut) * 180) / Math.PI;
+  if (cutDeg > 85) return null; // the cue ball would clip the object ball first or barely touch it
+  // Throw turns the object ball off the line of centres, toward the cue ball's direction of travel.
+  const thr = strokeThrow(stroke, Math.abs(signedCut));
+  const obDir = thr ? centres - Math.sign(signedCut) * thr : centres;
+  return {
+    obDir,
+    lineOfCentres: centres,
+    ghost,
+    aimDir,
+    cutDeg,
+    throwDeg: (thr * 180) / Math.PI,
+    miss: missDistance(ob, pocket, win, obDir),
+  };
+}
+
+/**
+ * The aim that sends the object ball along `obDir` after throw, or null if the
+ * cut is unplayable. Throw depends on the cut, which depends on the aim, so
+ * this solves for the line of centres by fixed-point iteration (throw is a few
+ * degrees and smooth, so it converges in a handful of steps).
+ */
 export function candidateFor(
   table: Table,
   cue: V2,
@@ -150,16 +196,17 @@ export function candidateFor(
   pocket: Pocket,
   win: Window,
   obDir: number,
+  stroke: Stroke = 'geometry',
 ): Candidate | null {
-  const { objectR, cueR } = table.format;
-  const u = dir(obDir);
-  const ghost = sub(ob, scale(u, objectR + cueR));
-  const travel = sub(ghost, cue);
-  if (len(travel) < 0.05) return null;
-  const aimDir = angleOf(travel);
-  const cutDeg = (Math.abs(wrap(obDir - aimDir)) * 180) / Math.PI;
-  if (cutDeg > 85) return null; // the cue ball would clip the object ball first or barely touch it
-  return { obDir, ghost, aimDir, cutDeg, miss: missDistance(ob, pocket, win, obDir) };
+  let centres = obDir;
+  for (let i = 0; i < 60; i++) {
+    const c = aimForCentres(table, cue, ob, pocket, win, centres, stroke);
+    if (!c) return null;
+    const error = wrap(obDir - c.obDir);
+    if (Math.abs(error) < 1e-13) return { ...c, obDir };
+    centres += error;
+  }
+  return null;
 }
 
 /** Which way a Choice misses: an overcut hits too thin, an undercut too full. */
@@ -175,8 +222,8 @@ export const MIN_TANGENT_CUT = 5;
 
 /** Direction of the Tangent Line: where a stunned cue ball goes after contact, 90° off the object ball's path. */
 export function tangentDir(c: Candidate): number {
-  const side = Math.sign(wrap(c.aimDir - c.obDir)) || 1;
-  return c.obDir + (side * Math.PI) / 2;
+  const side = Math.sign(wrap(c.aimDir - c.lineOfCentres)) || 1;
+  return c.lineOfCentres + (side * Math.PI) / 2;
 }
 
 /** The pocket a stunned cue ball would roll straight into after `c`'s contact, if any. */
@@ -232,6 +279,7 @@ function makeDistractors(
   pocket: Pocket,
   win: Window,
   difficulty: Difficulty,
+  stroke: Stroke,
 ): Candidate[] | null {
   const r = table.format.objectR;
   const { near, step } = DISTRACTOR_SPREAD[difficulty];
@@ -244,7 +292,7 @@ function makeDistractors(
     let made: Candidate | null = null;
     for (const side of [first, -first]) {
       const obDir = side < 0 ? win.lo - offset : win.hi + offset;
-      made = candidateFor(table, cue, ob, pocket, win, obDir);
+      made = candidateFor(table, cue, ob, pocket, win, obDir, stroke);
       if (made) break;
     }
     if (!made) return null;
@@ -271,7 +319,7 @@ export const DIFFICULTY_MAX_CUT: Record<Difficulty, number> = { easy: 30, medium
  * Shot Links and past Dailies replay through it (see docs/adr/0001), and the
  * `keep generator v… stable` tests pin its output. Changes go in a new version.
  */
-function buildShot(formatId: FormatId, difficulty: Difficulty, rng: Rng, rules: Rules): Shot {
+function buildShot(formatId: FormatId, difficulty: Difficulty, stroke: Stroke, rng: Rng, rules: Rules): Shot {
   const table = tableFor(formatId);
   const { objectR, cueR } = table.format;
   for (let attempt = 0; attempt < 5000; attempt++) {
@@ -297,10 +345,12 @@ function buildShot(formatId: FormatId, difficulty: Difficulty, rng: Rng, rules: 
     const cue = sub(ghost, scale(dir(aimDir), between(rng, 0.3, 2)));
     if (!onTable(table, cue, cueR)) continue;
 
-    const correct = candidateFor(table, cue, ob, pocket, win, obDir);
+    const correct = candidateFor(table, cue, ob, pocket, win, obDir, stroke);
     if (!correct) continue;
+    // Compensating for throw means cutting a little more; keep that inside the Difficulty's cap.
+    if (stroke !== 'geometry' && correct.cutDeg > maxCut) continue;
     if (rules.rejectStunScratch && stunScratch(table, correct)) continue;
-    const distractors = makeDistractors(rng, table, cue, ob, pocket, win, difficulty);
+    const distractors = makeDistractors(rng, table, cue, ob, pocket, win, difficulty, stroke);
     if (!distractors) continue;
 
     const choices = [correct, ...distractors];
@@ -316,7 +366,9 @@ function buildShot(formatId: FormatId, difficulty: Difficulty, rng: Rng, rules: 
       objectSpin: [rng() * 0.8 - 0.4, rng() * Math.PI * 2, rng() * 0.8 - 0.4],
       pocket,
       window: win,
+      stroke,
       correct,
+      geometric: stroke === 'geometry' ? null : aimForCentres(table, cue, ob, pocket, win, obDir, stroke),
       choices,
       correctIndex: choices.indexOf(correct),
       cutDeg: correct.cutDeg,
@@ -325,20 +377,31 @@ function buildShot(formatId: FormatId, difficulty: Difficulty, rng: Rng, rules: 
   throw new Error('Could not generate a shot');
 }
 
-export const GENERATORS: Record<number, (f: FormatId, d: Difficulty, rng: Rng) => Shot> = {
-  // v1: every Difficulty draws the full Cut Angle range.
-  1: (f, d, rng) => buildShot(f, d, rng, { maxCut: (_, kind) => tableMaxCut(kind), rejectStunScratch: false }),
+export const GENERATORS: Record<number, (f: FormatId, d: Difficulty, rng: Rng, stroke: Stroke) => Shot> = {
+  // v1: every Difficulty draws the full Cut Angle range. Geometry only.
+  1: (f, d, rng) => buildShot(f, d, 'geometry', rng, { maxCut: (_, kind) => tableMaxCut(kind), rejectStunScratch: false }),
   // v2: Difficulty caps the Cut Angle (Easy 30°, Medium 60°, Hard 75°), and no stun-shot scratches.
-  2: (f, d, rng) =>
-    buildShot(f, d, rng, {
+  // Also the first with throw: the Stroke decides which aim is correct.
+  2: (f, d, rng, stroke) =>
+    buildShot(f, d, stroke, rng, {
       maxCut: (diff, kind) => Math.min(DIFFICULTY_MAX_CUT[diff], tableMaxCut(kind)),
       rejectStunScratch: true,
     }),
 };
 export const CURRENT_GENERATOR = 2;
 
-export function generateShot(formatId: FormatId, difficulty: Difficulty, rng: Rng, version = CURRENT_GENERATOR): Shot {
+/** Oldest generator version that supports throw. */
+export const FIRST_THROW_GENERATOR = 2;
+
+export function generateShot(
+  formatId: FormatId,
+  difficulty: Difficulty,
+  rng: Rng,
+  version = CURRENT_GENERATOR,
+  stroke: Stroke = 'geometry',
+): Shot {
   const gen = GENERATORS[version];
   if (!gen) throw new Error(`Unknown generator version ${version}`);
-  return gen(formatId, difficulty, rng);
+  if (stroke !== 'geometry' && version < FIRST_THROW_GENERATOR) throw new Error(`Generator v${version} has no throw`);
+  return gen(formatId, difficulty, rng, stroke);
 }

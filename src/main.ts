@@ -19,15 +19,18 @@ import { freshKey, keyFromLocation, share, shotFromKey, shotLink, siteUrl, type 
 import { drawReveal } from './reveal';
 import { TableScene } from './scene';
 import type { OverlayLayers } from './overlay';
+import { STROKE_IDS, STROKES, strokeThrow, type Stroke } from './physics';
 import {
   loadDifficulty,
   loadFormat,
   loadOverlay,
+  loadStroke,
   loadStats,
   resetStats,
   saveDifficulty,
   saveFormat,
   saveOverlay,
+  saveStroke,
   saveStats,
   statsFor,
   type Stats,
@@ -53,6 +56,23 @@ let stats: Stats = loadStats();
 let difficulty: Difficulty = loadDifficulty();
 let format: FormatId = loadFormat();
 let overlayLayers: OverlayLayers = loadOverlay();
+let stroke: Stroke = loadStroke();
+
+/** Largest throw (degrees) a Stroke produces over the playable cut range. */
+const peakThrowDeg = (st: Stroke) => {
+  let best = 0;
+  for (let d = 1; d <= 75; d++) best = Math.max(best, strokeThrow(st, (d * Math.PI) / 180));
+  return (best * 180) / Math.PI;
+};
+
+const STROKE_HINTS: Record<Stroke, string> = {
+  geometry: 'Pure ghost-ball aim, no throw.',
+  slowStun: `A soft stun shot (about 1 mph, sliding at contact). Throw is biggest here, up to ${peakThrowDeg('slowStun').toFixed(1)}°, so aim thinner than the ghost ball.`,
+  firmRoll: `A firm follow shot (about 7 mph, rolling at contact). Throw is small, under ${Math.ceil(peakThrowDeg('firmRoll') * 10) / 10}°, but it adds up on long shots.`,
+};
+
+/** Table and Stroke, as shown in labels: "US 9ft" or "US 9ft · Slow stun". */
+const setupLabel = (f: FormatId, st: Stroke) => (st === 'geometry' ? FORMATS[f].short : `${FORMATS[f].short} · ${STROKES[st].name}`);
 
 // Per-run state.
 let mode: Mode = 'set';
@@ -229,7 +249,7 @@ function showHome() {
   window.scrollTo({ top: 0 });
   clearLink();
   views = [];
-  const fs = statsFor(stats, format);
+  const fs = statsFor(stats, format, stroke);
   const rows = fs.bands
     .map((b, i) => {
       const acc = b.attempts ? b.correct / b.attempts : 0;
@@ -264,19 +284,23 @@ function showHome() {
             hard: `Cuts up to ${DIFFICULTY_MAX_CUT.hard}°, including thin ones. The closest wrong Choice just catches the jaw.`,
           }[difficulty]
         }</p>
+        <div class="segmented" role="radiogroup" aria-label="Stroke">
+          ${STROKE_IDS.map((st) => `<button role="radio" aria-checked="${st === stroke}" data-st="${st}">${STROKES[st].name}</button>`).join('')}
+        </div>
+        <p class="hint">${STROKE_HINTS[stroke]}</p>
         <div class="actions">
           <button class="primary" data-start="set">Start a Set of ${SET_LENGTH}</button>
           <button data-start="endless">Endless</button>
         </div>
-        ${best !== undefined ? `<p class="hint">Best Set on ${f.short} ${difficulty}: ${best} / ${SET_LENGTH}</p>` : ''}
+        ${best !== undefined ? `<p class="hint">Best Set on ${setupLabel(format, stroke)} ${difficulty}: ${best} / ${SET_LENGTH}</p>` : ''}
       </section>
       <section class="stats">
-        <h2>Accuracy by Cut Angle · ${f.short}</h2>
+        <h2>Accuracy by Cut Angle · ${setupLabel(format, stroke)}</h2>
         <table>
           <thead><tr><th>Cut</th><th>Shots</th><th>Correct</th><th>Avg time</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
-        <button class="link" data-reset>Reset ${f.short} stats</button>
+        <button class="link" data-reset>Reset ${setupLabel(format, stroke)} stats</button>
       </section>
     </main>`),
   );
@@ -284,6 +308,13 @@ function showHome() {
     b.addEventListener('click', () => {
       format = b.dataset.f as FormatId;
       saveFormat(format);
+      showHome();
+    }),
+  );
+  app.querySelectorAll<HTMLButtonElement>('[data-st]').forEach((b) =>
+    b.addEventListener('click', () => {
+      stroke = b.dataset.st as Stroke;
+      saveStroke(stroke);
       showHome();
     }),
   );
@@ -301,8 +332,8 @@ function showHome() {
   const shareDaily = app.querySelector<HTMLButtonElement>('[data-share-daily]');
   shareDaily?.addEventListener('click', () => shareFrom(shareDaily, shareText(today(), dailyOutcomes(today())), siteUrl()));
   app.querySelector('[data-reset]')!.addEventListener('click', () => {
-    if (confirm(`Reset your ${f.name} stats?`)) {
-      resetStats(stats, format);
+    if (confirm(`Reset your ${setupLabel(format, stroke)} stats?`)) {
+      resetStats(stats, format, stroke);
       showHome();
     }
   });
@@ -344,12 +375,13 @@ function nextShot() {
       // After the shared Shot, keep training on the same table and difficulty.
       format = linkKey!.format;
       difficulty = linkKey!.difficulty;
+      stroke = linkKey!.stroke;
       clearLink();
       return start('endless');
     }
     key = linkKey!;
   } else {
-    key = freshKey(format, difficulty);
+    key = freshKey(format, difficulty, stroke);
   }
   shot = shotFromKey(key);
   selected = null;
@@ -360,7 +392,7 @@ function nextShot() {
   const view = h(`<main class="play">
     <header class="bar">
       <button class="link" data-home>← Home</button>
-      <span>${progressLabel()} · ${f.short}</span>
+      <span>${progressLabel()} · ${setupLabel(f.id, shot.stroke)}</span>
       <span class="bar-end">
         ${canFullscreen ? '<button class="link" data-fullscreen title="Full screen (F)"></button>' : ''}
         ${mode === 'daily' ? '' : '<button class="link" data-share-shot>Share shot</button>'}
@@ -372,7 +404,9 @@ function nextShot() {
         <canvas width="${STANDING_ASPECT * 300}" height="300" aria-label="Standing View of the shot"></canvas>
         <button class="zoom" aria-label="Enlarge">⤢</button>
       </figure>
-      <p class="caption">Standing View. The ringed pocket is the one you're playing.</p>
+      <p class="caption">Standing View. The ringed pocket is the one you're playing.${
+        shot.stroke === 'geometry' ? '' : ` <strong>Stroke: ${STROKES[shot.stroke].name}</strong>, so allow for throw.`
+      }</p>
     </section>
     <section class="answer">
       <p class="prompt">Which Aim View pockets the ball? <span>Tap a view to see it large.</span></p>
@@ -439,7 +473,7 @@ function lockIn() {
   results.push({ cutDeg: shot.cutDeg, outcome });
   if (mode === 'daily') recordDaily(dailyDate, outcome);
 
-  const fs = statsFor(stats, shot.table.format.id);
+  const fs = statsFor(stats, shot.table.format.id, shot.stroke);
   const band = fs.bands[bandOf(shot.cutDeg)];
   band.attempts++;
   band.totalMs += ms;
@@ -470,9 +504,12 @@ function lockIn() {
     h(`<div>
       <p class="verdict ${correct ? 'good' : 'bad'}"><strong>${correct ? 'Correct' : 'Miss'}</strong> · ${verdict}</p>
       <p class="facts">Cut Angle <strong>${shot.cutDeg.toFixed(1)}°</strong> · answered in ${(ms / 1000).toFixed(1)}s</p>
+      ${throwNote(shot)}
       <canvas class="diagram" width="1200" height="640" aria-label="Top-down diagram"></canvas>
       <p class="legend"><span class="key good"></span>Correct line and ghost ball ${correct ? '' : '<span class="key bad"></span>Your line'}${
-        shot.cutDeg >= MIN_TANGENT_CUT ? `<span class="key tangent${scratch ? ' scratch' : ''}"></span>Cue ball after contact (stun)` : ''
+        shot.cutDeg >= MIN_TANGENT_CUT && !STROKES[shot.stroke].rolling
+          ? `<span class="key tangent${scratch ? ' scratch' : ''}"></span>Cue ball after contact (stun)`
+          : ''
       }</p>
       ${scratch ? `<p class="scratch-note">A stun shot scratches in the ${scratch.kind} pocket here, so play it with follow or draw.</p>` : ''}
       ${
@@ -484,7 +521,9 @@ function lockIn() {
             </div>`
       }
       ${overlayToggles()}
-      <p class="overlay-legend"><span class="key good"></span>Correct ghost ball, contact point and lines${correct ? '' : ' <span class="key bad"></span>Where your aim sent the cue ball'}</p>
+      <p class="overlay-legend"><span class="key good"></span>Correct ghost ball, contact point and lines${correct ? '' : ' <span class="key bad"></span>Where your aim sent the cue ball'}${
+        shot.geometric ? ' <span class="key geo"></span>Ghost ball ignoring throw' : ''
+      }</p>
       <button class="primary next">${nextLabel()}</button>
     </div>`),
   );
@@ -500,6 +539,18 @@ function lockIn() {
   // The thumbnails now get the Aim Overlay too.
   repaintAll();
   reveal.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+/** What throw did on this Shot, and what a pure ghost-ball aim would have done. */
+function throwNote(s: Shot): string {
+  if (!s.geometric) return '';
+  const t = s.correct.throwDeg.toFixed(1);
+  const geo = s.geometric;
+  const consequence =
+    geo.miss > 0
+      ? `A pure ghost-ball aim would miss by ${(geo.miss * 100).toFixed(1)} cm, so aim thinner (cut it a little more).`
+      : 'A pure ghost-ball aim still drops here, but only just, so the thinner aim is safer.';
+  return `<p class="throw-note">${STROKES[s.stroke].name} throws the object ball <strong>${t}°</strong> toward the cue ball's path. ${consequence}</p>`;
 }
 
 function onKey(e: KeyboardEvent) {
@@ -630,7 +681,7 @@ function showSummary() {
   window.scrollTo({ top: 0 });
   views = [];
   const score = results.filter((r) => r.outcome === 'correct').length;
-  const fs = statsFor(stats, format);
+  const fs = statsFor(stats, format, stroke);
   const prevBest = fs.bestSet[difficulty];
   const isBest = prevBest === undefined || score > prevBest;
   if (isBest) {
@@ -643,7 +694,7 @@ function showSummary() {
     const c = inBand.filter((r) => r.outcome === 'correct').length;
     return `<tr><td>${bandLabel(b)}</td><td>${c} / ${inBand.length}</td></tr>`;
   }).join('');
-  const label = `${FORMATS[format].short} ${difficulty}`;
+  const label = `${setupLabel(format, stroke)} ${difficulty}`;
   app.replaceChildren(
     h(`<main class="home">
       <h1>${score} / ${SET_LENGTH}</h1>

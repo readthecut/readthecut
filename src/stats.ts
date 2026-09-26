@@ -1,6 +1,7 @@
 import { DEFAULT_FORMAT, isFormatId, type FormatId } from './formats';
 import { BAND_COUNT, type Difficulty } from './geometry';
 import type { OverlayLayers } from './overlay';
+import { isStroke, type Stroke } from './physics';
 
 export interface BandStats {
   attempts: number;
@@ -14,13 +15,20 @@ export interface FormatStats {
   bestSet: Partial<Record<Difficulty, number>>;
 }
 
-export type Stats = Partial<Record<FormatId, FormatStats>>;
+/**
+ * Keyed by format for Geometry (the original layout, so old stats carry on) and
+ * `format:stroke` with throw, since compensating for throw is a separate skill.
+ */
+export type Stats = Partial<Record<string, FormatStats>>;
+
+const statsKey = (format: FormatId, stroke: Stroke) => (stroke === 'geometry' ? format : `${format}:${stroke}`);
 
 const STATS_KEY = 'readthecut.stats.v2';
 const STATS_V1_KEY = 'readthecut.stats.v1'; // one table of stats, all US 9ft
 const DIFFICULTY_KEY = 'readthecut.difficulty';
 const FORMAT_KEY = 'readthecut.format';
 const OVERLAY_KEY = 'readthecut.overlay';
+const STROKE_KEY = 'readthecut.stroke';
 // Keys from before the rename, read once so existing stats carry over.
 const LEGACY_KEYS: Record<string, string> = {
   [STATS_V1_KEY]: 'tightsight.stats.v1',
@@ -71,17 +79,18 @@ export function loadStats(): Stats {
   return {};
 }
 
-/** The stats for one format, created on first use. */
-export function statsFor(stats: Stats, format: FormatId): FormatStats {
-  const s = stats[format];
+/** The stats for one format and Stroke, created on first use. */
+export function statsFor(stats: Stats, format: FormatId, stroke: Stroke): FormatStats {
+  const key = statsKey(format, stroke);
+  const s = stats[key];
   if (valid(s)) return s;
-  return (stats[format] = emptyFormatStats());
+  return (stats[key] = emptyFormatStats());
 }
 
 export const saveStats = (stats: Stats) => write(STATS_KEY, JSON.stringify(stats));
 
-export function resetStats(stats: Stats, format: FormatId) {
-  stats[format] = emptyFormatStats();
+export function resetStats(stats: Stats, format: FormatId, stroke: Stroke) {
+  stats[statsKey(format, stroke)] = emptyFormatStats();
   saveStats(stats);
 }
 
@@ -120,3 +129,15 @@ export function loadOverlay(): OverlayLayers {
 }
 
 export const saveOverlay = (layers: OverlayLayers) => write(OVERLAY_KEY, JSON.stringify(layers));
+
+export function loadStroke(): Stroke {
+  try {
+    const st = localStorage.getItem(STROKE_KEY);
+    if (isStroke(st)) return st;
+  } catch {
+    // fall through
+  }
+  return 'geometry';
+}
+
+export const saveStroke = (st: Stroke) => write(STROKE_KEY, st);

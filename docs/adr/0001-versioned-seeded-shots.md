@@ -6,3 +6,4 @@ Shot Links and the Daily don't store a Shot. They store a key (generator version
 
 - Fixing an estimated pocket size, such as the UK or Chinese side pocket, means a new generator version that carries the corrected spec. Editing `formats.ts` in place would break old links.
 - `mulberry32` and `hashString` in `rng.ts` are part of this contract and must never change.
+- The throw model (`physics.ts`: TP A.14's equations, friction fit and Stroke speeds) decides which Choice is correct from generator v2 onward, so it is part of this contract too.

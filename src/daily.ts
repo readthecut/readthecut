@@ -39,6 +39,7 @@ export function dailyKeys(date: string): ShotKey[] {
     version,
     format: DAILY_FORMAT,
     difficulty: DAILY_DIFFICULTY,
+    stroke: 'geometry' as const, // everyone plays the Daily on the same, throw-free rules
     seed: `daily${date.replaceAll('-', '')}n${i}`,
   }));
 }

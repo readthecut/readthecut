@@ -544,3 +544,19 @@ body.playing .about {
 .overlay-toggles button[data-layer='closeUp'][aria-pressed='false'] {
   text-decoration: none;
 }
+
+/* ---------- throw ---------- */
+
+.key.geo {
+  background: #7dd3fc;
+  margin-left: 12px;
+}
+.throw-note {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: -4px 0 12px;
+}
+.throw-note strong,
+.caption strong {
+  color: var(--text);
+}

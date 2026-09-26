@@ -1,3 +1,4 @@
+import { STROKES } from './physics';
 import { objectColour } from './scene';
 import { MIN_TANGENT_CUT, dir, dist, stunScratch, tangentEnd, type Candidate, type Shot, type V2 } from './geometry';
 
@@ -65,7 +66,8 @@ export function drawReveal(canvas: HTMLCanvasElement, shot: Shot, chosen: Candid
   };
 
   // Tangent Line of the correct shot: where a stunned cue ball goes after contact.
-  if (shot.correct.cutDeg >= MIN_TANGENT_CUT) {
+  // Stun only: a rolling cue ball follows forward instead of taking the Tangent Line.
+  if (shot.correct.cutDeg >= MIN_TANGENT_CUT && !STROKES[shot.stroke].rolling) {
     const scratch = stunScratch(shot.table, shot.correct);
     line(shot.correct.ghost, tangentEnd(shot.table, shot.correct), scratch ? SCRATCH : TANGENT, [2, 4], 1.5);
   }
