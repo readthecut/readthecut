@@ -76,8 +76,10 @@ export const recentAverage = (p: StageProgress) => {
   return last.length ? last.reduce((a, b) => a + b, 0) / last.length : null;
 };
 
+export type PlacementChange = 'aidOff' | 'aidOn' | 'passed' | null;
+
 /** Record one placement and apply the fading rules. Returns what changed, for the UI to announce. */
-export function recordPlacement(p: StageProgress, errorDeg: number): { progress: StageProgress; change: 'aidOff' | 'aidOn' | 'passed' | null } {
+export function recordPlacement(p: StageProgress, errorDeg: number): { progress: StageProgress; change: PlacementChange } {
   const next: StageProgress = { ...p, errors: [...p.errors, errorDeg].slice(-2 * WINDOW) };
   if (next.errors.length < WINDOW) return { progress: next, change: null };
   const avg = recentAverage(next)!;

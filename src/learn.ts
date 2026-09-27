@@ -21,6 +21,8 @@ import {
   referenceShot,
   startPlacement,
   trainerShot,
+  type Assessment,
+  type PlacementChange,
   type Placement,
   type Stage,
 } from './trainer';
@@ -43,7 +45,10 @@ const AIM_ASPECT = 4 / 3;
 const TRAINER_ASPECT = 16 / 9;
 const REFERENCE_SET = 10;
 
-/** Which sets of markings to show after locking in. Both come back on at every lock-in, so you always see your result first. */
+/**
+ * Which sets of markings to show after locking in. They carry across Stages while viewing one
+ * answer, and all come back on at the next lock-in, so you always see your result first.
+ */
 const revealShown = { mine: true, correct: true, closeUp: false };
 
 /** One key handler at a time for these screens, removed when leaving them. */
@@ -76,8 +81,11 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
   let shot: Shot = trainerShot(ctx.format(), ctx.difficulty());
   let placement: Placement = startPlacement(shot);
   let answered = false;
-  /** Stages whose answer has been shown for this shot: a repeat in another stage isn't scored. */
-  let revealedIn = new Set<Stage>();
+  /**
+   * The shot's locked-in answer. It belongs to the shot, not a Stage: after locking in, every
+   * view shows the same result, and Next shot is how to try again.
+   */
+  let answer: { placement: Placement; stage: Stage; assessment: Assessment; change: PlacementChange } | null = null;
   let view: View;
   // Drag calibration, refreshed after each render.
   let toTable: ((x: number, y: number) => { x: number; z: number }) | null = null;
@@ -163,14 +171,17 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
 
   function newShot() {
     shot = trainerShot(ctx.format(), ctx.difficulty());
-    revealedIn = new Set();
+    answer = null;
     restart();
   }
 
-  /** Place this same shot again from the start: after switching Stage, the balls stay where they are. */
+  /**
+   * Show this same shot in the current Stage. Once answered, that's the locked-in result seen
+   * from this view; before, the ghost ball starts fresh, so help in one Stage can't carry over.
+   */
   function restart() {
-    placement = startPlacement(shot);
-    answered = false;
+    placement = answer ? answer.placement : startPlacement(shot);
+    answered = !!answer;
     build();
   }
 
@@ -247,6 +258,7 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
     const end = () => (drag = null);
     canvas.addEventListener('pointerup', end);
     canvas.addEventListener('pointercancel', end);
+    if (answer) showResult(false);
 
     setKeys((e) => {
       if (fullscreenKey(e)) return;
@@ -270,18 +282,17 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
     revealShown.mine = true;
     revealShown.correct = true;
     revealShown.closeUp = false;
-    const a = assess(shot, placement);
-    // Once the answer has been seen in one Stage, placing the same shot in another is much easier.
-    const scored = revealedIn.size === 0;
-    revealedIn.add(stage);
-    let change: ReturnType<typeof recordPlacement>['change'] = null;
-    if (scored) {
-      const r = recordPlacement(progress[stage], a.errorDeg);
-      progress = { ...progress, [stage]: r.progress };
-      change = r.change;
-      saveTrainer(progress);
-    }
+    const assessment = assess(shot, placement);
+    const r = recordPlacement(progress[stage], assessment.errorDeg);
+    progress = { ...progress, [stage]: r.progress };
+    saveTrainer(progress);
+    answer = { placement, stage, assessment, change: r.change };
+    showResult(true);
+  }
 
+  /** The feedback panel for the locked-in answer, as seen from the current Stage. */
+  function showResult(justLocked: boolean) {
+    const { assessment: a, change } = answer!;
     const where =
       a.kind === 'exact'
         ? 'Spot on.'
@@ -292,24 +303,28 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
         : a.miss > 0.5
           ? 'The object ball would miss the pocket by a long way.'
           : `The object ball would miss by ${(a.miss * 100).toFixed(1)} cm.`;
+    const answeredIn = answer!.stage;
     const announce = {
       aidOff: `Nice: your last 10 averaged under ${AID_OFF_BELOW}°, so the help is off now.`,
       aidOn: 'Your last 10 averaged over 3°, so the help is back on for a while.',
-      passed: `Stage ${stage} passed: 10 in a row without help, averaging under ${AID_OFF_BELOW}°.${stage < 3 ? ` Try stage ${stage + 1}.` : ''}`,
+      passed: `Stage ${answeredIn} passed: 10 in a row without help, averaging under ${AID_OFF_BELOW}°.${answeredIn < 3 ? ` Try stage ${answeredIn + 1}.` : ''}`,
     };
     const reveal = app.querySelector<HTMLElement>('.reveal')!;
     reveal.hidden = false;
     reveal.replaceChildren(
       h(`<div>
         <p class="verdict ${a.miss > 0 ? 'bad' : 'good'}">${where} ${outcome}</p>
-        ${scored ? '' : '<p class="facts">Not scored: you have already seen this shot’s answer in another stage.</p>'}
+        ${
+          answeredIn === stage
+            ? ''
+            : `<p class="facts">Locked in on Stage ${answeredIn} (${STAGES[answeredIn].view}), seen here from the ${STAGES[stage].view}.</p>`
+        }
         <div class="overlay-toggles" role="group" aria-label="Show">
           <button data-show="mine" aria-pressed="${revealShown.mine}"><span class="key placed"></span>Your ghost ball &amp; path</button>
           <button data-show="correct" aria-pressed="${revealShown.correct}"><span class="key good"></span>Correct ghost ball &amp; path</button>
           ${stage === 3 ? `<button data-show="closeUp" aria-pressed="${revealShown.closeUp}">Close-up</button>` : ''}
         </div>
         ${change ? `<p class="announce">${announce[change]}</p>` : ''}
-
       </div>`),
     );
     // The control bar's middle button becomes Next shot.
@@ -327,7 +342,7 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
         repaint(view);
       }),
     );
-    reveal.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (justLocked) reveal.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
   build();
