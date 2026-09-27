@@ -2,6 +2,7 @@
 
 import * as THREE from 'three';
 import type { FormatId } from './formats';
+import { bindFullscreen, fullscreenButton, fullscreenKey } from './fullscreen';
 import { angleOf, sub, type Candidate, type Difficulty, type Shot } from './geometry';
 import { buildPlacementMarkings } from './overlay';
 import { drawPlacement } from './reveal';
@@ -186,7 +187,7 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
       <header class="bar">
         <button class="link" data-home>← Home</button>
         <span>Stage ${stage}/3 · ${STAGES[stage].view}</span>
-        <span class="avg">${averageText()}</span>
+        <span class="bar-end">${fullscreenButton()}<span class="avg">${averageText()}</span></span>
       </header>
       <section class="learn-view">
         <figure><canvas class="drag" aria-label="${STAGES[stage].view}: drag to move the ghost ball"></canvas></figure>
@@ -217,6 +218,7 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
     view = addView(canvas, TRAINER_ASPECT, render);
 
     screen.querySelector('[data-home]')!.addEventListener('click', () => leave(ctx));
+    bindFullscreen(screen);
     bindStageTabs(screen);
     screen.querySelectorAll<HTMLButtonElement>('[data-nudge]').forEach((b) =>
       b.addEventListener('click', () => nudge(Number(b.dataset.nudge))),
@@ -247,6 +249,7 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
     canvas.addEventListener('pointercancel', end);
 
     setKeys((e) => {
+      if (fullscreenKey(e)) return;
       if (e.key === 'ArrowLeft') {
         e.preventDefault();
         nudge(-1);
@@ -360,7 +363,7 @@ export function showReference(ctx: LearnContext) {
       <header class="bar">
         <button class="link" data-home>← Home</button>
         <span>Reference Pictures · ${results.length + 1} / ${REFERENCE_SET}</span>
-        <span>Score ${score}${results.length ? ` / ${results.length}` : ''}</span>
+        <span class="bar-end">${fullscreenButton()}<span>Score ${score}${results.length ? ` / ${results.length}` : ''}</span></span>
       </header>
       <section class="learn-view">
         <figure><canvas aria-label="Aim View"></canvas></figure>
@@ -380,8 +383,10 @@ export function showReference(ctx: LearnContext) {
     resetViews();
     view = addView(screen.querySelector('canvas')!, AIM_ASPECT, (c) => table.renderAim(c, shot.correct, layers()));
     screen.querySelector('[data-home]')!.addEventListener('click', () => leave(ctx));
+    bindFullscreen(screen);
     screen.querySelectorAll<HTMLButtonElement>('[data-o]').forEach((b) => b.addEventListener('click', () => answer(Number(b.dataset.o))));
     setKeys((e) => {
+      if (fullscreenKey(e)) return;
       const i = ['1', '2', '3', '4', '5'].indexOf(e.key);
       if (i >= 0 && !answered) answer(i);
       else if (e.key === 'Enter' && answered) {

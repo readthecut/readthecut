@@ -14,12 +14,13 @@ import {
   type Outcome,
 } from './daily';
 import { FORMAT_IDS, FORMATS, type FormatId } from './formats';
+import { bindFullscreen, fullscreenButton, fullscreenKey } from './fullscreen';
 import { BAND_COUNT, BAND_SIZE, DIFFICULTY_MAX_CUT, MIN_TANGENT_CUT, bandOf, missKind, stunScratch, type Difficulty, type Shot } from './geometry';
 import { freshKey, keyFromLocation, share, shotFromKey, shotLink, siteUrl, type ShotKey } from './links';
 import { currentStage, showReference, showTrainer, stagesPassed, type LearnContext } from './learn';
 import { drawReveal } from './reveal';
 import { TableScene } from './scene';
-import { addView, paint, paintAll, repaintAll, resetViews, type View } from './views';
+import { addView, paint, repaintAll, resetViews, type View } from './views';
 import type { OverlayLayers } from './overlay';
 import { STROKE_IDS, STROKES, strokeThrow, type Stroke } from './physics';
 import {
@@ -153,31 +154,6 @@ async function shareFrom(button: HTMLButtonElement, text: string, url?: string) 
   button.textContent = result === 'copied' ? 'Copied' : 'Could not copy';
   setTimeout(() => (button.textContent = label), 1600);
 }
-
-// ---------- full screen ----------
-
-/** Desktop only: phones already fill the screen, and their full-screen support is patchy. */
-const canFullscreen = document.fullscreenEnabled && matchMedia('(pointer: fine)').matches;
-
-function toggleFullscreen() {
-  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-  else document.documentElement.requestFullscreen().catch(() => {});
-}
-
-function syncFullscreen() {
-  const on = !!document.fullscreenElement;
-  document.body.classList.toggle('fullscreen', on);
-  app.querySelectorAll<HTMLButtonElement>('[data-fullscreen]').forEach((b) => {
-    b.textContent = on ? 'Exit full screen' : 'Full screen';
-    b.setAttribute('aria-pressed', String(on));
-  });
-}
-
-document.addEventListener('fullscreenchange', () => {
-  syncFullscreen();
-  // The layout grows or shrinks, so re-render every view at its new size.
-  requestAnimationFrame(paintAll);
-});
 
 function clearLink() {
   if (location.hash) history.replaceState(null, '', location.pathname + location.search);
@@ -388,7 +364,7 @@ function nextShot() {
       <button class="link" data-home>← Home</button>
       <span>${progressLabel()} · ${setupLabel(f.id, shot.stroke)}</span>
       <span class="bar-end">
-        ${canFullscreen ? '<button class="link" data-fullscreen title="Full screen (F)"></button>' : ''}
+        ${fullscreenButton()}
         ${mode === 'daily' ? '' : '<button class="link" data-share-shot>Share shot</button>'}
         <span>Score ${score}${results.length ? ` / ${results.length}` : ''}</span>
       </span>
@@ -411,8 +387,7 @@ function nextShot() {
   </main>`);
   app.replaceChildren(view);
   view.querySelector('[data-home]')!.addEventListener('click', showHome);
-  view.querySelector('[data-fullscreen]')?.addEventListener('click', toggleFullscreen);
-  syncFullscreen();
+  bindFullscreen(view);
   const shareShot = view.querySelector<HTMLButtonElement>('[data-share-shot]');
   shareShot?.addEventListener('click', () => shareFrom(shareShot, 'Can you read this cut? Pick the aim that pockets it.', shotLink(key)));
 
@@ -566,7 +541,7 @@ function onKey(e: KeyboardEvent) {
     return;
   }
   const k = e.key.toLowerCase();
-  if (k === 'f' && canFullscreen && !e.metaKey && !e.ctrlKey) return toggleFullscreen();
+  if (fullscreenKey(e)) return;
   const idx = ['1', '2', '3', '4'].indexOf(k) >= 0 ? Number(k) - 1 : ['a', 'b', 'c', 'd'].indexOf(k);
   if (idx >= 0 && app.querySelector('.choices')) return select(idx);
   if (e.key === 'Enter' || k === 'n') {
