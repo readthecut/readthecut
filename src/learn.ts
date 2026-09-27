@@ -37,11 +37,9 @@ export interface LearnContext {
 const NUDGE = (0.5 * Math.PI) / 180;
 /** In the 3D views the balls are small, so the pointer moves this many times further than the ghost ball. */
 const DRAG_GEARING = 4;
-const TOP_DOWN_ASPECT = 16 / 10;
-const STANDING_ASPECT = 16 / 10;
 const AIM_ASPECT = 4 / 3;
-/** Stage 3 is wide: a landscape view at full width is closer to what you see down on a shot. */
-const WIDE_AIM_ASPECT = 16 / 9;
+/** Every trainer Stage uses one wide view at full width, the controls in a bar underneath. */
+const TRAINER_ASPECT = 16 / 9;
 const REFERENCE_SET = 10;
 
 /** Which sets of markings to show after locking in. Both come back on at every lock-in, so you always see your result first. */
@@ -184,16 +182,7 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
     );
 
   function build() {
-    const aspect = stage === 1 ? TOP_DOWN_ASPECT : stage === 2 ? STANDING_ASPECT : WIDE_AIM_ASPECT;
-    // Stage 3 puts the controls in a bar under a full-width view; the others keep them beside it.
-    const wide = stage === 3;
-    const controls = `<div class="nudge">
-          <button data-nudge="-1" aria-label="Nudge left 0.5°">◀ 0.5°</button>
-          ${wide ? '<button class="primary lock">Lock in</button>' : ''}
-          <button data-nudge="1" aria-label="Nudge right 0.5°">0.5° ▶</button>
-        </div>
-        ${wide ? '' : '<button class="primary lock">Lock in</button>'}`;
-    const screen = h(`<main class="play learn${wide ? ' wide' : ''}">
+    const screen = h(`<main class="play learn wide">
       <header class="bar">
         <button class="link" data-home>← Home</button>
         <span>Stage ${stage}/3 · ${STAGES[stage].view}</span>
@@ -201,7 +190,11 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
       </header>
       <section class="learn-view">
         <figure><canvas class="drag" aria-label="${STAGES[stage].view}: drag to move the ghost ball"></canvas></figure>
-        ${wide ? controls : ''}
+        <div class="nudge">
+          <button data-nudge="-1" aria-label="Nudge left 0.5°">◀ 0.5°</button>
+          <button class="primary lock">Lock in</button>
+          <button data-nudge="1" aria-label="Nudge right 0.5°">0.5° ▶</button>
+        </div>
       </section>
       <section class="learn-side">
         <div class="stage-tabs" role="group" aria-label="Stage">${stageTabs()}</div>
@@ -211,8 +204,7 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
             : 'Drag the white ghost ball round the object ball until it would send the object ball into the ringed pocket.'
         }</p>
         <p class="aid">${aidText()}</p>
-        ${wide ? '<p class="rotate-hint">Turn your phone sideways for a bigger view.</p>' : ''}
-        ${wide ? '' : controls}
+        <p class="rotate-hint">Turn your phone sideways for a bigger view.</p>
         <div class="reveal" hidden></div>
       </section>
     </main>`);
@@ -222,7 +214,7 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
     table.setShot(shot);
     resetViews();
     const canvas = screen.querySelector<HTMLCanvasElement>('.learn-view canvas')!;
-    view = addView(canvas, aspect, render);
+    view = addView(canvas, TRAINER_ASPECT, render);
 
     screen.querySelector('[data-home]')!.addEventListener('click', () => leave(ctx));
     bindStageTabs(screen);
@@ -314,13 +306,11 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
           ${stage === 3 ? `<button data-show="closeUp" aria-pressed="${revealShown.closeUp}">Close-up</button>` : ''}
         </div>
         ${change ? `<p class="announce">${announce[change]}</p>` : ''}
-        ${stage === 3 ? '' : '<button class="primary next">Next shot</button>'}
+
       </div>`),
     );
-    const lock = app.querySelector<HTMLButtonElement>('.lock')!;
-    // Stage 3 keeps its button in the control bar and turns it into Next shot; the others hide it.
-    if (stage === 3) lock.textContent = 'Next shot';
-    else lock.hidden = true;
+    // The control bar's middle button becomes Next shot.
+    app.querySelector<HTMLButtonElement>('.lock')!.textContent = 'Next shot';
     app.querySelector('.avg')!.textContent = averageText();
     app.querySelector('.aid')!.innerHTML = aidText();
     app.querySelector('.stage-tabs')!.innerHTML = stageTabs();
@@ -334,7 +324,6 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
         repaint(view);
       }),
     );
-    reveal.querySelector('.next')?.addEventListener('click', newShot);
     reveal.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 

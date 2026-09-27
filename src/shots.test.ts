@@ -87,9 +87,9 @@ describe('Daily', () => {
     expect(b).toEqual(a);
   });
 
-  it('switches to generator v2 from 2026-09-27 only', () => {
-    expect(dailyKeys('2026-09-26').every((k) => k.version === 1)).toBe(true);
-    expect(dailyKeys('2026-09-27').every((k) => k.version === 2)).toBe(true);
+  it('switches to generator v2 from 2026-09-28 only', () => {
+    expect(dailyKeys('2026-09-27').every((k) => k.version === 1)).toBe(true);
+    expect(dailyKeys('2026-09-28').every((k) => k.version === 2)).toBe(true);
   });
 
   it('shares an emoji grid without spoilers', () => {

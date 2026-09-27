@@ -13,7 +13,7 @@ export const DAILY_EPOCH = '2026-09-25';
  */
 const DAILY_GENERATORS: { from: string; version: number }[] = [
   { from: DAILY_EPOCH, version: 1 },
-  { from: '2026-09-27', version: 2 },
+  { from: '2026-09-28', version: 2 }, // the day after v2 went live
 ];
 
 export type Outcome = 'correct' | 'over' | 'under';
