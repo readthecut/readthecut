@@ -211,6 +211,7 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
             : 'Drag the white ghost ball round the object ball until it would send the object ball into the ringed pocket.'
         }</p>
         <p class="aid">${aidText()}</p>
+        ${wide ? '<p class="rotate-hint">Turn your phone sideways for a bigger view.</p>' : ''}
         ${wide ? '' : controls}
         <div class="reveal" hidden></div>
       </section>

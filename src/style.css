@@ -712,3 +712,81 @@ body.playing .about {
   text-align: left;
   margin-top: 0;
 }
+
+/* ---------- trainer stage 3 on a phone ---------- */
+
+.rotate-hint {
+  display: none;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+@media (orientation: portrait) and (max-width: 600px) {
+  .learn.wide .rotate-hint {
+    display: block;
+  }
+}
+
+/* Phone held sideways: the Aim View takes the full height, controls go in a column on the right. */
+@media (orientation: landscape) and (max-height: 520px) {
+  .play.learn.wide {
+    max-width: none;
+    height: 100vh;
+    height: 100dvh;
+    padding: 8px;
+    gap: 8px;
+    grid-template-columns: minmax(0, 1fr) 196px;
+    grid-template-rows: auto auto minmax(0, 1fr);
+  }
+  /* Let the view and its control bar sit directly in the page grid. */
+  .play.learn.wide .learn-view {
+    display: contents;
+  }
+  .play.learn.wide .learn-view figure {
+    grid-column: 1;
+    grid-row: 1 / -1;
+    align-self: center;
+    width: 100%;
+    max-width: calc((100dvh - 16px) * 16 / 9);
+    margin: 0 auto;
+  }
+  .play.learn.wide .bar {
+    grid-column: 2;
+    grid-row: 1;
+    padding: 0;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    font-size: 0.8rem;
+  }
+  .play.learn.wide .nudge {
+    grid-column: 2;
+    grid-row: 2;
+    flex-wrap: wrap;
+    max-width: none;
+    margin: 0;
+  }
+  .play.learn.wide .nudge .lock {
+    order: -1; /* Lock in / Next shot on top, full width */
+    flex-basis: 100%;
+  }
+  .play.learn.wide .learn-side {
+    grid-column: 2;
+    grid-row: 3;
+    overflow-y: auto;
+    max-width: none;
+    text-align: left;
+    font-size: 0.85rem;
+  }
+  .play.learn.wide .stage-tabs {
+    justify-content: flex-start;
+  }
+  .play.learn.wide .stage-tabs button,
+  .play.learn.wide .overlay-toggles button {
+    font-size: 0.75rem;
+  }
+  .play.learn.wide .overlay-toggles {
+    justify-content: flex-start;
+  }
+  .play.learn.wide .reveal {
+    padding: 10px;
+  }
+}
