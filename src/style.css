@@ -14,6 +14,10 @@
 * {
   box-sizing: border-box;
 }
+/* `hidden` must win over any display set by a class. */
+[hidden] {
+  display: none !important;
+}
 
 body {
   margin: 0;
@@ -735,7 +739,11 @@ body.playing .about {
     padding: 8px;
     gap: 8px;
     grid-template-columns: minmax(0, 1fr) 196px;
-    grid-template-rows: auto auto minmax(0, 1fr);
+    grid-template-rows: auto auto auto minmax(0, 1fr);
+  }
+  .play.learn.wide .learn-tools {
+    grid-column: 2;
+    grid-row: 3;
   }
   /* Let the view and its control bar sit directly in the page grid. */
   .play.learn.wide .learn-view {
@@ -770,7 +778,7 @@ body.playing .about {
   }
   .play.learn.wide .learn-side {
     grid-column: 2;
-    grid-row: 3;
+    grid-row: 4;
     overflow-y: auto;
     max-width: none;
     text-align: left;
@@ -803,4 +811,74 @@ body.playing .about {
   color: var(--muted);
   font-size: 0.7rem;
   margin-left: 2px;
+}
+
+/* ---------- trainer: toggles beside the view ---------- */
+
+/* Stacked (narrow screens): view and control bar, then the toggles, then the rest. */
+.learn.wide .bar {
+  order: 0;
+}
+.learn.wide .learn-view {
+  order: 1;
+}
+.learn.wide .learn-tools {
+  order: 2;
+}
+.learn.wide .learn-side {
+  order: 3;
+}
+.learn-tools .overlay-toggles {
+  margin: 0;
+}
+.learn-tools .overlay-toggles > span {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+/* Wide screens: the view is height-limited, so use the space either side of it. */
+@media (min-width: 1100px) and (min-height: 521px) and (orientation: landscape) {
+  .play.learn.wide {
+    max-width: none;
+    /* The view claims its full height-limited width first; the side columns share what's left. */
+    grid-template-columns: minmax(170px, 1fr) minmax(0, calc((100vh - 140px) * 16 / 9)) minmax(230px, 1fr);
+    grid-template-areas:
+      'bar bar bar'
+      'tools view side';
+    align-items: start;
+  }
+  .play.learn.wide .bar {
+    grid-area: bar;
+  }
+  .play.learn.wide .learn-tools {
+    grid-area: tools;
+  }
+  .play.learn.wide .learn-view {
+    grid-area: view;
+  }
+  /* Only the control bar sits under the view now, so it can be taller. */
+  .play.learn.wide .learn-view figure,
+  .play.learn.wide .nudge {
+    max-width: calc((100vh - 140px) * 16 / 9);
+  }
+  .play.learn.wide .learn-side {
+    grid-area: side;
+    text-align: left;
+    max-width: none;
+  }
+  .play.learn.wide .learn-tools .overlay-toggles {
+    flex-direction: column;
+    align-items: stretch;
+    flex-wrap: nowrap;
+  }
+  .play.learn.wide .learn-tools .overlay-toggles button {
+    text-align: left;
+  }
+  .play.learn.wide .learn-tools .overlay-toggles .link {
+    text-align: left;
+    padding-left: 0;
+  }
+  .play.learn.wide .stage-tabs {
+    justify-content: flex-start;
+  }
 }

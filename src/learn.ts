@@ -273,6 +273,10 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
         <span>Stage ${stage}/3 · ${STAGES[stage].view}</span>
         <span class="bar-end">${fullscreenButton()}<span class="avg">${averageText()}</span></span>
       </header>
+      <section class="learn-tools">
+        <div class="mark-toggles overlay-toggles" role="group" aria-label="Show while placing"${answered ? ' hidden' : ''}>${markToggles()}</div>
+        <div class="result-toggles overlay-toggles" role="group" aria-label="Show" hidden></div>
+      </section>
       <section class="learn-view">
         <figure><canvas class="drag" aria-label="${STAGES[stage].view}: drag to move the ghost ball"></canvas></figure>
         <div class="nudge">
@@ -289,7 +293,6 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
             : 'Drag the white ghost ball round the object ball until it would send the object ball into the ringed pocket.'
         }</p>
         <p class="aid">${aidText()}</p>
-        <div class="mark-toggles overlay-toggles" role="group" aria-label="Show while placing"${answered ? ' hidden' : ''}>${markToggles()}</div>
         <p class="rotate-hint">Turn your phone sideways for a bigger view.</p>
         <div class="reveal" hidden></div>
       </section>
@@ -394,23 +397,24 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
             ? ''
             : `<p class="facts">Locked in on Stage ${answeredIn} (${STAGES[answeredIn].view}), seen here from the ${STAGES[stage].view}.</p>`
         }
-        <div class="overlay-toggles" role="group" aria-label="Show">
-          <button data-show="mine" aria-pressed="${revealShown.mine}"><span class="key placed"></span>Your ghost ball &amp; path</button>
-          <button data-show="correct" aria-pressed="${revealShown.correct}"><span class="key good"></span>Correct ghost ball &amp; path</button>
-          ${stage === 3 ? `<button data-show="closeUp" aria-pressed="${revealShown.closeUp}">Close-up</button>` : ''}
-        </div>
         ${change ? `<p class="announce">${announce[change]}</p>` : ''}
       </div>`),
     );
     // The control bar's middle button becomes Next shot; the placing toggles make way for the result's.
     app.querySelector<HTMLButtonElement>('.lock')!.textContent = 'Next shot';
     app.querySelector<HTMLElement>('.mark-toggles')!.hidden = true;
+    const toggles = app.querySelector<HTMLElement>('.result-toggles')!;
+    toggles.hidden = false;
+    toggles.innerHTML = `<span>Show</span>
+      <button data-show="mine" aria-pressed="${revealShown.mine}"><span class="key placed"></span>Your ghost ball &amp; path</button>
+      <button data-show="correct" aria-pressed="${revealShown.correct}"><span class="key good"></span>Correct ghost ball &amp; path</button>
+      ${stage === 3 ? `<button data-show="closeUp" aria-pressed="${revealShown.closeUp}">Close-up</button>` : ''}`;
     app.querySelector('.avg')!.textContent = averageText();
     app.querySelector('.aid')!.innerHTML = aidText();
     app.querySelector('.stage-tabs')!.innerHTML = stageTabs();
     bindStageTabs(app);
     repaint(view);
-    reveal.querySelectorAll<HTMLButtonElement>('[data-show]').forEach((b) =>
+    toggles.querySelectorAll<HTMLButtonElement>('[data-show]').forEach((b) =>
       b.addEventListener('click', () => {
         const k = b.dataset.show as keyof typeof revealShown;
         revealShown[k] = !revealShown[k];

@@ -10,7 +10,7 @@ export type Stage = 1 | 2 | 3;
 export const STAGES: Record<Stage, { name: string; view: string; aid: string }> = {
   1: { name: 'See it', view: 'Top-down', aid: 'The pocket line runs through the object ball. The ghost ball sits on it.' },
   2: { name: 'Stand and see it', view: 'Standing View', aid: 'The contact point is marked on the object ball.' },
-  3: { name: 'Down on it', view: 'Aim View', aid: 'No help: this is the picture you have at the table.' },
+  3: { name: 'Down on it', view: 'Aim View', aid: 'This is the picture you have at the table.' },
 };
 
 /** Where the placed ghost ball sits: the direction from the object ball's centre to the ghost ball's. */
