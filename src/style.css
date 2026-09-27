@@ -745,6 +745,9 @@ body.playing .about {
     grid-column: 2;
     grid-row: 3;
   }
+  .play.learn.wide .learn-notes {
+    display: none; /* no room beside the view; the instructions show in portrait */
+  }
   /* Let the view and its control bar sit directly in the page grid. */
   .play.learn.wide .learn-view {
     display: contents;
@@ -828,6 +831,10 @@ body.playing .about {
 .learn.wide .learn-side {
   order: 3;
 }
+.learn.wide .learn-notes {
+  order: 4;
+  text-align: center;
+}
 .learn-tools .overlay-toggles {
   margin: 0;
 }
@@ -836,49 +843,72 @@ body.playing .about {
   font-size: 0.8rem;
 }
 
-/* Wide screens: the view is height-limited, so use the space either side of it. */
-@media (min-width: 1100px) and (min-height: 521px) and (orientation: landscape) {
+/*
+ * Wide screens: the view keeps exactly the size it has in the stacked layout (full width,
+ * limited by height), and the side columns get only the space left either side of it. They
+ * only appear when that space is worth using; otherwise the stacked layout stays.
+ */
+@media (min-width: 1100px) and (min-height: 521px) and (min-aspect-ratio: 17 / 10) {
   .play.learn.wide {
+    --view-w: min(calc(100vw - 32px), calc((100vh - 190px) * 16 / 9));
     max-width: none;
-    /* The view claims its full height-limited width first; the side columns share what's left. */
-    grid-template-columns: minmax(170px, 1fr) minmax(0, calc((100vh - 140px) * 16 / 9)) minmax(230px, 1fr);
+    column-gap: 0;
+    grid-template-columns: minmax(0, 1fr) var(--view-w) minmax(0, 1fr);
     grid-template-areas:
       'bar bar bar'
-      'tools view side';
+      'tools view side'
+      '. notes .';
     align-items: start;
   }
   .play.learn.wide .bar {
     grid-area: bar;
   }
-  .play.learn.wide .learn-tools {
-    grid-area: tools;
-  }
   .play.learn.wide .learn-view {
     grid-area: view;
   }
-  /* Only the control bar sits under the view now, so it can be taller. */
-  .play.learn.wide .learn-view figure,
-  .play.learn.wide .nudge {
-    max-width: calc((100vh - 140px) * 16 / 9);
+  .play.learn.wide .learn-notes {
+    grid-area: notes;
+  }
+  .play.learn.wide .learn-tools {
+    grid-area: tools;
+    padding-right: 12px;
   }
   .play.learn.wide .learn-side {
     grid-area: side;
+    padding-left: 12px;
     text-align: left;
     max-width: none;
+    font-size: 0.8rem;
   }
-  .play.learn.wide .learn-tools .overlay-toggles {
+  .play.learn.wide .learn-view figure,
+  .play.learn.wide .nudge {
+    max-width: var(--view-w);
+  }
+  /* Compact, stacked controls to fit the narrow side columns. */
+  .play.learn.wide .learn-tools .overlay-toggles,
+  .play.learn.wide .stage-tabs {
     flex-direction: column;
     align-items: stretch;
     flex-wrap: nowrap;
+    gap: 6px;
   }
-  .play.learn.wide .learn-tools .overlay-toggles button {
+  .play.learn.wide .learn-tools .overlay-toggles button,
+  .play.learn.wide .stage-tabs button {
     text-align: left;
+    font-size: 0.78rem;
+    padding: 0.45em 0.6em;
   }
   .play.learn.wide .learn-tools .overlay-toggles .link {
-    text-align: left;
     padding-left: 0;
   }
-  .play.learn.wide .stage-tabs {
-    justify-content: flex-start;
+  .play.learn.wide .aid {
+    font-size: 0.78rem;
+  }
+  .play.learn.wide .reveal {
+    padding: 10px;
+    font-size: 0.8rem;
+  }
+  .play.learn.wide .reveal .verdict {
+    font-size: 0.85rem;
   }
 }

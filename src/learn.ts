@@ -287,14 +287,16 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
       </section>
       <section class="learn-side">
         <div class="stage-tabs" role="group" aria-label="Stage">${stageTabs()}</div>
+        <p class="aid">${aidText()}</p>
+        <div class="reveal" hidden></div>
+      </section>
+      <section class="learn-notes">
         <p class="prompt">${
           stage === 3
             ? 'Drag to swing your aim. The white ghost ball is where the cue ball would be at contact: set it so the object ball drops in the ringed pocket.'
             : 'Drag the white ghost ball round the object ball until it would send the object ball into the ringed pocket.'
         }</p>
-        <p class="aid">${aidText()}</p>
         <p class="rotate-hint">Turn your phone sideways for a bigger view.</p>
-        <div class="reveal" hidden></div>
       </section>
     </main>`);
     app.replaceChildren(screen);
