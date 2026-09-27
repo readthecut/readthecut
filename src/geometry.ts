@@ -16,9 +16,14 @@ export interface Pocket {
   kind: 'corner' | 'side';
   jaws: [V2, V2];
   mouth: V2; // midpoint between the jaws
-  hole: V2; // visual centre of the pocket opening
-  holeR: number; // visual radius of the opening
+  /** Where each facing meets the back of the cushion, in the same order as `jaws`. Visual only. */
+  throat: [V2, V2];
+  hole: V2; // visual centre of the drop hole, just behind the throat
+  holeR: number; // visual radius of the drop hole
 }
+
+/** Cushion depth, nose to rail (about 2"). Visual only. */
+export const CUSHION_W = 0.05;
 
 /** A Table Format with its pockets laid out. */
 export interface Table {
@@ -90,23 +95,37 @@ export function tableFor(id: FormatId): Table {
   const halfL = format.length / 2;
   const halfW = format.width / 2;
   const pockets: Pocket[] = [];
+  // How far each facing leans toward the pocket over the cushion's depth.
+  const lean = (facingDeg: number) => CUSHION_W * Math.tan(((facingDeg - 90) * Math.PI) / 180);
+  /** The drop hole sits just behind the throat, a little wider than it. */
+  const holeBehind = (throat: [V2, V2], outward: V2) => {
+    const mid = scale(add(throat[0], throat[1]), 0.5);
+    return { hole: add(mid, scale(outward, 0.02)), holeR: dist(throat[0], throat[1]) / 2 + 0.002 };
+  };
   const a = format.cornerMouth / Math.SQRT2; // jaw distance from the corner along each rail
+  const fc = lean(format.cornerFacingDeg);
   for (const sx of [-1, 1]) {
     for (const sz of [-1, 1]) {
       const jaws: [V2, V2] = [v(sx * (halfL - a), sz * halfW), v(sx * halfL, sz * (halfW - a))];
+      const throat: [V2, V2] = [
+        v(sx * (halfL - a + fc), sz * (halfW + CUSHION_W)),
+        v(sx * (halfL + CUSHION_W), sz * (halfW - a + fc)),
+      ];
       pockets.push({
         kind: 'corner',
         jaws,
         mouth: scale(add(jaws[0], jaws[1]), 0.5),
-        hole: v(sx * (halfL + 0.19 * a), sz * (halfW + 0.19 * a)),
-        holeR: 0.93 * a,
+        throat,
+        ...holeBehind(throat, v(sx * Math.SQRT1_2, sz * Math.SQRT1_2)),
       });
     }
   }
   const s = format.sideMouth / 2;
+  const fs = lean(format.sideFacingDeg);
   for (const sz of [-1, 1]) {
     const jaws: [V2, V2] = [v(-s, sz * halfW), v(s, sz * halfW)];
-    pockets.push({ kind: 'side', jaws, mouth: v(0, sz * halfW), hole: v(0, sz * (halfW + 0.63 * s)), holeR: 1.1 * s });
+    const throat: [V2, V2] = [v(-(s - fs), sz * (halfW + CUSHION_W)), v(s - fs, sz * (halfW + CUSHION_W))];
+    pockets.push({ kind: 'side', jaws, mouth: v(0, sz * halfW), throat, ...holeBehind(throat, v(0, sz)) });
   }
   t = { format, halfL, halfW, pockets };
   tables.set(id, t);

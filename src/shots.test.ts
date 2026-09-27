@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { dailyKeys, dailyNumber, shareText } from './daily';
 import { FORMAT_IDS } from './formats';
-import { DIFFICULTY_MAX_CUT, MAX_CUT, aimForCentres, dist, missKind, onTable, stunScratch, type Difficulty } from './geometry';
+import { DIFFICULTY_MAX_CUT, MAX_CUT, aimForCentres, dist, missKind, onTable, stunScratch, tableFor, type Difficulty } from './geometry';
 import { decodeKey, encodeKey, freshKey, shotFromKey } from './links';
 
 describe('generateShot', () => {
@@ -141,5 +141,29 @@ describe('Throw (CIT)', () => {
     expect(encodeKey(freshKey('us9', 'easy')).split('.')).toHaveLength(4);
     expect(decodeKey('1.us9.m.s.abcdefg')).toBeNull();
     expect(decodeKey('2.us9.m.x.abcdefg')).toBeNull();
+  });
+});
+
+describe('Pocket shape (visual)', () => {
+  it('US facings taper the opening to a throat that still passes a ball', () => {
+    const t = tableFor('us9');
+    const ballD = 2 * t.format.objectR;
+    for (const p of t.pockets) {
+      const mouth = dist(p.jaws[0], p.jaws[1]);
+      const throat = dist(p.throat[0], p.throat[1]);
+      expect(throat).toBeLessThan(mouth); // 142° corners and 104° sides both narrow the pocket
+      expect(throat).toBeGreaterThan(ballD * 1.4);
+    }
+    // 142°: each facing leans 52° past square, so a 4½" corner narrows to about 3.7".
+    const corner = t.pockets.find((p) => p.kind === 'corner')!;
+    expect(dist(corner.throat[0], corner.throat[1]) / 0.0254).toBeCloseTo(3.72, 1);
+  });
+
+  it('every drop hole sits behind its throat, clear of the cushion corners', () => {
+    for (const id of FORMAT_IDS) {
+      for (const p of tableFor(id).pockets) {
+        for (const q of p.throat) expect(dist(p.hole, q)).toBeGreaterThan(p.holeR);
+      }
+    }
   });
 });

@@ -1,7 +1,7 @@
 import { STROKES } from './physics';
 import { objectColour } from './scene';
 import type { PlacingMarks } from './overlay';
-import { MIN_TANGENT_CUT, dir, dist, stunScratch, tangentEnd, type Candidate, type Shot, type V2 } from './geometry';
+import { CUSHION_W, MIN_TANGENT_CUT, dir, dist, stunScratch, tangentEnd, type Candidate, type Shot, type V2 } from './geometry';
 
 const CORRECT = '#4ade80';
 const WRONG = '#f87171';
@@ -39,13 +39,25 @@ function topDown(canvas: HTMLCanvasElement, shot: Shot, focus?: V2[]) {
 
   g.fillStyle = '#15171b';
   g.fillRect(0, 0, width, height);
-  // Rail and cloth.
-  g.fillStyle = '#5a3320';
-  g.fillRect(ox - (format.length / 2 + margin) * s, oy - (format.width / 2 + margin) * s, (format.length + 2 * margin) * s, (format.width + 2 * margin) * s);
-  // Pockets before the cloth, so the cloth covers the part of each circle inside the nose line.
-  g.fillStyle = '#050505';
+  const rect = (hx: number, hz: number, fill: string) => {
+    g.fillStyle = fill;
+    g.fillRect(ox - hx * s, oy - hz * s, 2 * hx * s, 2 * hz * s);
+  };
+  const poly = (pts: V2[], fill: string) => {
+    g.fillStyle = fill;
+    g.beginPath();
+    pts.forEach((p, i) => (i ? g.lineTo(...px(p)) : g.moveTo(...px(p))));
+    g.closePath();
+    g.fill();
+  };
+  // Rail, then the cushion band, then each pocket: the tapered opening (its shelf is cloth) and
+  // the drop hole behind the throat. The cloth goes on last, covering everything inside the noses.
+  rect(format.length / 2 + margin, format.width / 2 + margin, '#5a3320');
+  rect(format.length / 2 + CUSHION_W, format.width / 2 + CUSHION_W, '#185c3c');
   for (const p of pockets) {
+    poly([p.jaws[0], p.throat[0], p.throat[1], p.jaws[1]], '#1d6b47');
     const [x, y] = px(p.hole);
+    g.fillStyle = '#050505';
     g.beginPath();
     g.arc(x, y, p.holeR * s, 0, Math.PI * 2);
     g.fill();

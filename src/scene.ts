@@ -1,12 +1,15 @@
 import * as THREE from 'three';
-import { type Candidate, type Pocket, type Shot, type Table, type V2 } from './geometry';
+import { CUSHION_W, type Candidate, type Pocket, type Shot, type Table, type V2 } from './geometry';
 import { buildAimOverlay, disposeOverlay, setOverlayResolution, type OverlayLayers } from './overlay';
 
 // Heights are metres above the cloth.
-const CUSHION_H = 0.038;
-const CUSHION_W = 0.05;
+/** Cushion nose height: WPA puts it at 63.5% of the ball's diameter, so it scales with each table's balls. */
+const cushionHeight = (t: Table) => 0.635 * 2 * t.format.objectR;
+/** The rail cap sits a little above the cushion nose; the cushion's top slopes up to meet it. */
+const railHeight = (t: Table) => cushionHeight(t) + 0.008;
+const DIAMOND_FROM_NOSE = 3.6875 * 0.0254; // WPA: 3 11/16" from the cushion nose to the diamond's centre
+const RAIL_CORNER_R = 0.06; // rounded outer corners
 const RAIL_W = 0.13;
-const RAIL_H = 0.046;
 const STANDING_EYE = 1.6 - 0.76; // eye height minus table height
 const STANDING_BACK = 0.9;
 const CUE_ELEVATION = (4 * Math.PI) / 180; // a normal stance, cue nearly level
@@ -122,6 +125,49 @@ function applyClip(material: THREE.Material, clip: ReturnType<typeof pocketClip>
   material.clippingPlanes = clip.planes;
   material.clipIntersection = clip.intersection;
   material.needsUpdate = true;
+}
+
+/** A rectangle with rounded corners, as XZ points, for the rail's outline and the table body. */
+function roundedRect(hx: number, hz: number, r: number): V2[] {
+  const pts: V2[] = [];
+  const corners: [number, number, number][] = [
+    [hx - r, hz - r, 0],
+    [-hx + r, hz - r, Math.PI / 2],
+    [-hx + r, -hz + r, Math.PI],
+    [hx - r, -hz + r, (3 * Math.PI) / 2],
+  ];
+  for (const [cx, cz, start] of corners) {
+    for (let i = 0; i <= 8; i++) {
+      const a = start + (i / 8) * (Math.PI / 2);
+      pts.push({ x: cx + Math.cos(a) * r, z: cz + Math.sin(a) * r });
+    }
+  }
+  return pts;
+}
+
+/**
+ * A cushion: its footprint runs from the nose (a→b, at the cushion's height) back to
+ * where the facings meet the rail (bb→ba, a little higher), so the top slopes up
+ * to the rail like the rubber under the cloth. Flat-shaded triangles.
+ */
+function cushionGeometry(a: V2, b: V2, bb: V2, ba: V2, noseH: number, backH: number): THREE.BufferGeometry {
+  // Faces are wound so their normals point outward; rails on opposite sides run the other way round.
+  const topFacesUp = (b.z - a.z) * (bb.x - a.x) - (b.x - a.x) * (bb.z - a.z) > 0;
+  if (!topFacesUp) return cushionGeometry(b, a, ba, bb, noseH, backH);
+  const P = (p: V2, y: number) => [p.x, y, p.z];
+  const tris: number[] = [];
+  const quad = (p: number[], q: number[], r: number[], t: number[]) => tris.push(...p, ...q, ...r, ...p, ...r, ...t);
+  const [a0, b0, bb0, ba0] = [P(a, 0), P(b, 0), P(bb, 0), P(ba, 0)];
+  const [a1, b1, bb1, ba1] = [P(a, noseH), P(b, noseH), P(bb, backH), P(ba, backH)];
+  quad(a1, b1, bb1, ba1); // sloped top
+  quad(a0, b0, b1, a1); // nose face
+  quad(b0, bb0, bb1, b1); // facing at b
+  quad(ba0, a0, a1, ba1); // facing at a
+  quad(bb0, ba0, ba1, bb1); // back, against the rail
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(tris, 3));
+  geo.computeVertexNormals();
+  return geo;
 }
 
 function ballTexture(n: number, style: Table['format']['balls']): THREE.CanvasTexture {
@@ -279,6 +325,8 @@ export class TableScene {
   private buildTable(table: Table): THREE.Group {
     const group = new THREE.Group();
     const { halfL, halfW, pockets } = table;
+    const cushionH = cushionHeight(table);
+    const railH = railHeight(table);
     // Cloth and wood get little of the environment: the lamps light them, the room barely does.
     const cloth = new THREE.MeshStandardMaterial({ color: '#1d6b47', roughness: 0.95, envMapIntensity: 0.02 });
     const cushionCloth = new THREE.MeshStandardMaterial({ color: '#1a6040', roughness: 0.95, envMapIntensity: 0.02 });
@@ -302,41 +350,39 @@ export class TableScene {
       group.add(floor);
       const wallBlack = black.clone();
       applyClip(wallBlack, pocketClip(table, p, CUSHION_W));
-      const wall = new THREE.Mesh(new THREE.CylinderGeometry(r, r, RAIL_H, 40, 1, true), wallBlack);
-      wall.position.set(p.hole.x, RAIL_H / 2, p.hole.z);
+      const wall = new THREE.Mesh(new THREE.CylinderGeometry(r, r, railH, 40, 1, true), wallBlack);
+      wall.position.set(p.hole.x, railH / 2, p.hole.z);
       group.add(wall);
+      // Pocket liner: the pale ring round the drop hole on the rail.
+      const linerMat = new THREE.MeshStandardMaterial({ color: '#8f9398', roughness: 0.45, envMapIntensity: 0.3 });
+      applyClip(linerMat, pocketClip(table, p, CUSHION_W));
+      const liner = new THREE.Mesh(layFlat(new THREE.RingGeometry(r, r + 0.012, 48), railH + 0.0004), linerMat);
+      liner.position.set(p.hole.x, 0, p.hole.z);
+      group.add(liner);
     }
 
-    // Cushions: one prism per rail segment, running between the jaws.
-    // Facings angle back into the pocket: sharply at corners (WPA 142°), barely at sides (104°).
-    const CORNER_FLARE = CUSHION_W * 0.7;
-    const SIDE_FLARE = CUSHION_W * Math.tan((14 * Math.PI) / 180);
-    const segments: [V2, V2, V2, number][] = []; // start jaw, end jaw, outward normal, flare at the end jaw
-    const corner = pockets.filter((p) => p.kind === 'corner');
-    const side = pockets.filter((p) => p.kind === 'side');
-    const jawOnLong = (p: Table['pockets'][number]) => p.jaws.find((j) => Math.abs(Math.abs(j.z) - halfW) < 1e-9)!;
-    const jawOnShort = (p: Table['pockets'][number]) => p.jaws.find((j) => Math.abs(Math.abs(j.x) - halfL) < 1e-9)!;
+    // Cushions: one per rail segment, from jaw to jaw along the nose, with the facings running
+    // back to the throat points the pocket geometry derives from the WPA facing angles.
+    const corner = (sx: number, sz: number) => pockets.find((p) => p.kind === 'corner' && Math.sign(p.mouth.x) === sx && Math.sign(p.mouth.z) === sz)!;
+    const side = (sz: number) => pockets.find((p) => p.kind === 'side' && Math.sign(p.mouth.z) === sz)!;
+    const segments: [V2, V2, V2, V2][] = []; // nose start, nose end, back at end, back at start
     for (const sz of [-1, 1]) {
-      const sidePocket = side.find((p) => Math.sign(p.mouth.z) === sz)!;
       for (const sx of [-1, 1]) {
-        const c = corner.find((p) => Math.sign(p.mouth.x) === sx && Math.sign(p.mouth.z) === sz)!;
-        const sj = sidePocket.jaws.find((j) => Math.sign(j.x) === sx)!;
-        segments.push([jawOnLong(c), sj, { x: 0, z: sz }, SIDE_FLARE]);
+        // Long rail: corner pocket's long-rail jaw (index 0) to the side pocket's jaw on this half.
+        const c = corner(sx, sz);
+        const sp = side(sz);
+        const j = sx < 0 ? 0 : 1;
+        segments.push([c.jaws[0], sp.jaws[j], sp.throat[j], c.throat[0]]);
       }
     }
     for (const sx of [-1, 1]) {
-      const [a, b] = corner.filter((p) => Math.sign(p.mouth.x) === sx);
-      segments.push([jawOnShort(a), jawOnShort(b), { x: sx, z: 0 }, CORNER_FLARE]);
+      // Short rail: between the two corners' short-rail jaws (index 1).
+      const a = corner(sx, -1);
+      const b = corner(sx, 1);
+      segments.push([a.jaws[1], b.jaws[1], b.throat[1], a.throat[1]]);
     }
-    for (const [a, b, n, endFlare] of segments) {
-      const along = { x: b.x - a.x, z: b.z - a.z };
-      const l = Math.hypot(along.x, along.z);
-      const t = { x: along.x / l, z: along.z / l };
-      const back = (p: V2, s: number) => ({ x: p.x + n.x * CUSHION_W + t.x * s, z: p.z + n.z * CUSHION_W + t.z * s });
-      // Every segment starts at a corner jaw.
-      const shape = flatShape([a, b, back(b, endFlare), back(a, -CORNER_FLARE)]);
-      const geo = new THREE.ExtrudeGeometry(shape, { depth: CUSHION_H, bevelEnabled: false });
-      const mesh = new THREE.Mesh(layFlat(geo, 0), cushionCloth);
+    for (const [a, b, bb, ba] of segments) {
+      const mesh = new THREE.Mesh(cushionGeometry(a, b, bb, ba, cushionH, railH), cushionCloth);
       mesh.receiveShadow = true;
       group.add(mesh);
     }
@@ -344,23 +390,21 @@ export class TableScene {
     // Rails: outer rectangle with the pocket-bitten inner outline cut out.
     const ox = halfL + CUSHION_W + RAIL_W;
     const oz = halfW + CUSHION_W + RAIL_W;
-    const outer = flatShape([
-      { x: -ox, z: -oz }, { x: ox, z: -oz }, { x: ox, z: oz }, { x: -ox, z: oz },
-    ]);
+    const outer = flatShape(roundedRect(ox, oz, RAIL_CORNER_R));
     outer.holes.push(new THREE.Path(railInnerOutline(table).map((p) => new THREE.Vector2(p.x, -p.z))));
-    const rail = new THREE.Mesh(layFlat(new THREE.ExtrudeGeometry(outer, { depth: RAIL_H, bevelEnabled: false }), 0), wood);
+    const rail = new THREE.Mesh(layFlat(new THREE.ExtrudeGeometry(outer, { depth: railH, bevelEnabled: false }), 0), wood);
     group.add(rail);
 
-    // Table body below the rail.
-    const body = new THREE.Mesh(new THREE.BoxGeometry(2 * ox, 0.25, 2 * oz), new THREE.MeshStandardMaterial({ color: '#3d2215', roughness: 0.6 }));
-    body.position.y = -0.127; // top face just below the cloth
-    group.add(body);
+    // Table body below the rail, with the same rounded corners.
+    const bodyGeo = layFlat(new THREE.ExtrudeGeometry(flatShape(roundedRect(ox, oz, RAIL_CORNER_R)), { depth: 0.25, bevelEnabled: false }), -0.252);
+    const body = new THREE.Mesh(bodyGeo, new THREE.MeshStandardMaterial({ color: '#3d2215', roughness: 0.6 }));
+    group.add(body); // top face just below the cloth
 
     // Diamonds: every eighth of the length, every quarter of the width.
     const pearl = new THREE.MeshStandardMaterial({ color: '#efe6cf', roughness: 0.3 });
     const diamondGeo = new THREE.CircleGeometry(0.009, 4);
-    layFlat(diamondGeo, RAIL_H + 0.0006);
-    const railMid = CUSHION_W + RAIL_W / 2;
+    layFlat(diamondGeo, railH + 0.0006);
+    const railMid = DIAMOND_FROM_NOSE;
     const addDiamond = (x: number, z: number) => {
       const d = new THREE.Mesh(diamondGeo, pearl);
       d.position.set(x, 0, z);
@@ -418,7 +462,7 @@ export class TableScene {
       blob.position.set(p.x, 0.0007, p.z);
       blob.scale.set(r * 2.1, 1, r * 2.1);
     }
-    this.pocketMarker.position.set(shot.pocket.hole.x, RAIL_H + 0.001, shot.pocket.hole.z);
+    this.pocketMarker.position.set(shot.pocket.hole.x, railHeight(shot.table) + 0.001, shot.pocket.hole.z);
     this.pocketMarker.scale.setScalar(shot.pocket.holeR + 0.004);
     applyClip(this.pocketMarker.material as THREE.Material, pocketClip(shot.table, shot.pocket, CUSHION_W));
     this.objectBall.rotation.set(...shot.objectSpin);
@@ -576,9 +620,9 @@ export class TableScene {
     const { halfL, halfW } = s.table;
     let e = CUE_ELEVATION;
     for (const [t, height] of [
-      [exit(halfL, halfW), CUSHION_H],
+      [exit(halfL, halfW), cushionHeight(s.table)],
       // Each obstacle's nearest edge is where the cue is lowest over it.
-      [exit(halfL + CUSHION_W, halfW + CUSHION_W), RAIL_H],
+      [exit(halfL + CUSHION_W, halfW + CUSHION_W), railHeight(s.table)],
     ] as const) {
       if (t > 0.01) e = Math.max(e, Math.atan((height + CUE_CLEARANCE - cueR) / t));
     }
