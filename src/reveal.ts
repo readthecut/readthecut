@@ -1,5 +1,6 @@
 import { STROKES } from './physics';
 import { objectColour } from './scene';
+import type { PlacingMarks } from './overlay';
 import { MIN_TANGENT_CUT, dir, dist, stunScratch, tangentEnd, type Candidate, type Shot, type V2 } from './geometry';
 
 const CORRECT = '#4ade80';
@@ -123,7 +124,7 @@ export function drawPlacement(
   canvas: HTMLCanvasElement,
   shot: Shot,
   placed: Candidate,
-  opts: { pocketLineAid: boolean; reveal: boolean; showMine?: boolean; showCorrect?: boolean },
+  opts: { marks: PlacingMarks; reveal: boolean; showMine?: boolean; showCorrect?: boolean },
 ): { toTable: (x: number, y: number) => V2; toCanvas: (p: V2) => readonly [number, number] } {
   const { format } = shot.table;
   const { g, s, px, toTable, line, ball, obPath } = topDown(canvas, shot, [shot.cue, shot.object, shot.pocket.mouth]);
@@ -136,7 +137,8 @@ export function drawPlacement(
   g.arc(hx, hy, (shot.pocket.holeR + 0.006) * s, 0, Math.PI * 2);
   g.stroke();
 
-  if (opts.pocketLineAid && !opts.reveal) {
+  const { marks } = opts;
+  if (marks.pocketLine && !opts.reveal) {
     // From the pocket through the object ball and out the far side: the ghost ball sits on this line.
     const u = dir(shot.correct.obDir);
     const beyond = { x: shot.object.x - u.x * 4 * format.objectR, z: shot.object.z - u.z * 4 * format.objectR };
@@ -144,7 +146,9 @@ export function drawPlacement(
   }
   const mine = !opts.reveal || opts.showMine !== false;
   const correct = opts.reveal && opts.showCorrect !== false;
-  if (mine) line(shot.cue, placed.ghost, 'rgba(247, 245, 238, 0.8)', [6, 4]);
+  // While placing, the ghost ball and its aim line can each be hidden; after locking in, "yours" shows both.
+  const showGhost = opts.reveal ? mine : marks.ghost;
+  if (mine && marks.aimLine) line(shot.cue, placed.ghost, 'rgba(247, 245, 238, 0.8)', [6, 4]);
   if (opts.reveal && mine) line(shot.object, obPath(placed), placed.miss > 0 ? WRONG : CORRECT);
   if (correct) {
     line(shot.cue, shot.correct.ghost, 'rgba(74, 222, 128, 0.7)', [6, 4]);
@@ -153,6 +157,12 @@ export function drawPlacement(
   }
   ball(shot.cue, format.cueR, '#f7f5ee', null);
   ball(shot.object, format.objectR, objectColour(shot), null);
-  if (mine) ball(placed.ghost, format.cueR, 'rgba(247, 245, 238, 0.35)', PLACED, false);
+  if (showGhost) ball(placed.ghost, format.cueR, 'rgba(247, 245, 238, 0.35)', PLACED, false);
+  if (marks.contact && !opts.reveal) {
+    // The correct contact point, on the object ball's edge facing the ghost ball.
+    const u = dir(shot.correct.obDir);
+    const cp = { x: shot.object.x - u.x * format.objectR, z: shot.object.z - u.z * format.objectR };
+    ball(cp, format.objectR * 0.3, CORRECT, null);
+  }
   return { toTable, toCanvas: px };
 }

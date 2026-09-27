@@ -143,30 +143,49 @@ export function setOverlayResolution(group: THREE.Group, width: number, height: 
 // The placed ghost ball is a see-through cue ball: white, so it never matches an object ball's colour.
 export const PLACED = '#f7f5ee';
 
+/** What the Ghost Ball Trainer shows while placing: the two helps, and how your own placement is drawn. */
+export interface PlacingMarks {
+  pocketLine: boolean;
+  contact: boolean;
+  aimLine: boolean;
+  ghost: boolean;
+}
+
 /**
- * Markings for the Ghost Ball Trainer: the viewer's placed ghost ball (white),
- * an optional aid, and after locking in, the correct ghost ball and both paths.
- * After locking in, `showMine` and `showCorrect` switch each set on or off.
+ * Markings for the Ghost Ball Trainer. While placing: the chosen `marks`. After
+ * locking in: your ghost ball and path (`showMine`) and the correct ones (`showCorrect`).
  */
 export function buildPlacementMarkings(
   shot: Shot,
   placed: Candidate,
-  opts: { contactAid: boolean; reveal: boolean; aimLine: boolean; showMine?: boolean; showCorrect?: boolean },
+  opts: { marks: PlacingMarks; reveal: boolean; showMine?: boolean; showCorrect?: boolean },
   lineWidthPx: number,
   eye: THREE.Vector3,
 ): THREE.Group {
   const { group, at, cueCentre, cueR, line, ghost, contact, obPath } = markingKit(shot, lineWidthPx, eye);
-  const mine = !opts.reveal || opts.showMine !== false;
-  const correct = opts.reveal && opts.showCorrect !== false;
-  if (opts.aimLine && mine) line(cueCentre, at(placed.ghost, cueR), AIM, true);
-  if (mine) ghost(placed, PLACED, 0.3);
-  // Larger than the reveal dots: this aid has to read from standing height.
-  if (opts.contactAid && !opts.reveal) contact(shot.correct, GOOD, 0.4);
-  if (opts.reveal && mine) {
+  const { marks } = opts;
+  if (!opts.reveal) {
+    if (marks.pocketLine) {
+      // From the pocket through the object ball and out the far side: the ghost ball sits on this line.
+      const u = dir(shot.correct.obDir);
+      const r = shot.table.format.objectR;
+      const beyond = at({ x: shot.object.x - u.x * 4 * r, z: shot.object.z - u.z * 4 * r }, r);
+      line(at(shot.pocket.mouth, r), beyond, AIM, true);
+    }
+    if (marks.aimLine) line(cueCentre, at(placed.ghost, cueR), AIM, true);
+    if (marks.ghost) ghost(placed, PLACED, 0.3);
+    // Larger than the reveal dots: this help has to read from standing height.
+    if (marks.contact) contact(shot.correct, GOOD, 0.4);
+    return group;
+  }
+  const mine = opts.showMine !== false;
+  if (mine) {
+    if (marks.aimLine) line(cueCentre, at(placed.ghost, cueR), AIM, true);
+    ghost(placed, PLACED, 0.3);
     obPath(placed, placed.miss > 0 ? BAD : GOOD);
     contact(placed, PLACED);
   }
-  if (correct) {
+  if (opts.showCorrect !== false) {
     ghost(shot.correct, GOOD);
     obPath(shot.correct, GOOD);
     contact(shot.correct, GOOD);

@@ -61,15 +61,18 @@ export const AID_OFF_BELOW = 2;
 const AID_BACK_ABOVE = 3;
 
 export interface StageProgress {
-  /** Errors (degrees) since the aid last switched on or off. */
+  /** Errors (degrees) since the automatic help last switched on or off. */
   errors: number[];
+  /** The automatic help: on until the player is accurate enough, then faded out. */
   aid: boolean;
   /** Passed: a full window without help, averaging under AID_OFF_BELOW. */
   done: boolean;
+  /** Placements in a row made without any help showing, whether faded out or switched off by hand. */
+  unaidedRun?: number;
 }
 
 /** Stages 1–2 start with their aid on; stage 3 has none, so it starts off. */
-export const freshProgress = (aid = true): StageProgress => ({ errors: [], aid, done: false });
+export const freshProgress = (aid = true): StageProgress => ({ errors: [], aid, done: false, unaidedRun: 0 });
 
 export const recentAverage = (p: StageProgress) => {
   const last = p.errors.slice(-WINDOW);
@@ -78,14 +81,32 @@ export const recentAverage = (p: StageProgress) => {
 
 export type PlacementChange = 'aidOff' | 'aidOn' | 'passed' | null;
 
-/** Record one placement and apply the fading rules. Returns what changed, for the UI to announce. */
-export function recordPlacement(p: StageProgress, errorDeg: number): { progress: StageProgress; change: PlacementChange } {
-  const next: StageProgress = { ...p, errors: [...p.errors, errorDeg].slice(-2 * WINDOW) };
+/**
+ * Record one placement and apply the fading rules. `aided` is whether any help was
+ * actually showing: a player can switch help off by hand before it fades, and those
+ * placements count toward passing. Returns what changed, for the UI to announce.
+ */
+export function recordPlacement(
+  p: StageProgress,
+  errorDeg: number,
+  aided = p.aid,
+): { progress: StageProgress; change: PlacementChange } {
+  const next: StageProgress = {
+    ...p,
+    errors: [...p.errors, errorDeg].slice(-2 * WINDOW),
+    unaidedRun: aided ? 0 : (p.unaidedRun ?? 0) + 1,
+  };
   if (next.errors.length < WINDOW) return { progress: next, change: null };
   const avg = recentAverage(next)!;
-  if (next.aid && avg <= AID_OFF_BELOW) return { progress: { ...next, aid: false, errors: [] }, change: 'aidOff' };
-  if (!next.aid && avg <= AID_OFF_BELOW && !next.done) return { progress: { ...next, done: true }, change: 'passed' };
-  if (!next.aid && avg > AID_BACK_ABOVE) return { progress: { ...next, aid: true, errors: [] }, change: 'aidOn' };
+  if (!aided && next.unaidedRun! >= WINDOW && avg <= AID_OFF_BELOW && !next.done) {
+    return { progress: { ...next, aid: false, done: true }, change: 'passed' };
+  }
+  if (aided && next.aid && avg <= AID_OFF_BELOW) {
+    return { progress: { ...next, aid: false, errors: [], unaidedRun: 0 }, change: 'aidOff' };
+  }
+  if (!aided && !next.aid && avg > AID_BACK_ABOVE) {
+    return { progress: { ...next, aid: true, errors: [], unaidedRun: 0 }, change: 'aidOn' };
+  }
   return { progress: next, change: null };
 }
 

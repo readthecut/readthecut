@@ -1,6 +1,6 @@
 import { DEFAULT_FORMAT, isFormatId, type FormatId } from './formats';
 import { BAND_COUNT, type Difficulty } from './geometry';
-import type { OverlayLayers } from './overlay';
+import type { OverlayLayers, PlacingMarks } from './overlay';
 import { isStroke, type Stroke } from './physics';
 import { OVERLAPS, freshProgress, type Stage, type StageProgress } from './trainer';
 
@@ -173,3 +173,20 @@ export function loadReference(): ReferenceStats {
 }
 
 export const saveReference = (r: ReferenceStats) => write(REFERENCE_KEY, JSON.stringify(r));
+
+/** Each trainer marking is 'auto' (follows the Stage and its fading help) or set by hand. */
+export type MarkSetting = 'auto' | 'on' | 'off';
+export type MarkSettings = Record<keyof PlacingMarks, MarkSetting>;
+
+const MARKS_KEY = 'readthecut.trainerMarks.v1';
+export const AUTO_MARKS: MarkSettings = { pocketLine: 'auto', contact: 'auto', aimLine: 'auto', ghost: 'auto' };
+
+export function loadMarkSettings(): MarkSettings {
+  try {
+    return { ...AUTO_MARKS, ...(JSON.parse(localStorage.getItem(MARKS_KEY) ?? '{}') as Partial<MarkSettings>) };
+  } catch {
+    return { ...AUTO_MARKS };
+  }
+}
+
+export const saveMarkSettings = (m: MarkSettings) => write(MARKS_KEY, JSON.stringify(m));

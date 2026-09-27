@@ -59,6 +59,21 @@ describe('help fading', () => {
     expect(p.aid).toBe(false);
   });
 
+  it('passes with help switched off by hand, before it would have faded', () => {
+    let p = freshProgress(); // automatic help still on
+    let change: string | null = null;
+    for (let i = 0; i < 10; i++) ({ progress: p, change } = recordPlacement(p, AID_OFF_BELOW / 2, false));
+    expect(change).toBe('passed');
+    expect(p.done).toBe(true);
+  });
+
+  it('an aided placement breaks an unaided run', () => {
+    let p = freshProgress();
+    for (let i = 0; i < 9; i++) p = recordPlacement(p, 5, false).progress;
+    p = recordPlacement(p, 5, true).progress;
+    expect(p.unaidedRun).toBe(0);
+  });
+
   it('brings the aid back after a poor unaided window', () => {
     let p = { ...freshProgress(), aid: false };
     let change: string | null = null;

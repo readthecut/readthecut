@@ -790,3 +790,17 @@ body.playing .about {
     padding: 10px;
   }
 }
+
+/* Trainer: what to show while placing. */
+.mark-toggles {
+  justify-content: flex-start;
+  margin: 4px 0 8px;
+}
+.learn.wide .mark-toggles {
+  justify-content: center;
+}
+.mark-toggles small {
+  color: var(--muted);
+  font-size: 0.7rem;
+  margin-left: 2px;
+}

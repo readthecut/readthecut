@@ -4,10 +4,19 @@ import * as THREE from 'three';
 import type { FormatId } from './formats';
 import { bindFullscreen, fullscreenButton, fullscreenKey } from './fullscreen';
 import { angleOf, sub, type Candidate, type Difficulty, type Shot } from './geometry';
-import { buildPlacementMarkings } from './overlay';
+import { buildPlacementMarkings, type PlacingMarks } from './overlay';
 import { drawPlacement } from './reveal';
 import type { TableScene } from './scene';
-import { loadReference, loadTrainer, saveReference, saveTrainer } from './stats';
+import {
+  AUTO_MARKS,
+  loadMarkSettings,
+  loadReference,
+  loadTrainer,
+  saveMarkSettings,
+  saveReference,
+  saveTrainer,
+  type MarkSettings,
+} from './stats';
 import {
   AID_OFF_BELOW,
   OVERLAPS,
@@ -92,7 +101,23 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
   let pxPerRad = 0;
 
   const placed = (): Candidate => aimFor(shot, placement)!;
-  const aid = () => stage !== 3 && progress[stage].aid;
+  let markSettings: MarkSettings = loadMarkSettings();
+
+  /** What each marking does on 'auto': the Stage's own help while it hasn't faded, the aim line outside Stage 3. */
+  const autoMarks = (): PlacingMarks => ({
+    pocketLine: stage === 1 && progress[1].aid,
+    contact: stage === 2 && progress[2].aid,
+    aimLine: stage !== 3,
+    ghost: true,
+  });
+  /** The markings actually shown: 'auto' follows autoMarks, otherwise the player's own choice. */
+  const marks = (): PlacingMarks => {
+    const auto = autoMarks();
+    const pick = (k: keyof PlacingMarks) => (markSettings[k] === 'auto' ? auto[k] : markSettings[k] === 'on');
+    return { pocketLine: pick('pocketLine'), contact: pick('contact'), aimLine: pick('aimLine'), ghost: pick('ghost') };
+  };
+  /** Whether any help is showing; a placement made without it counts toward passing the Stage. */
+  const helpShowing = () => marks().pocketLine || marks().contact;
 
   /** How far the ghost ball moves on screen per radian of Placement, from the view just rendered. */
   const calibrate = (c: HTMLCanvasElement) => {
@@ -115,20 +140,20 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
   const render = (c: HTMLCanvasElement) => {
     const p = placed();
     if (stage === 1) {
-      const conv = drawPlacement(c, shot, p, { pocketLineAid: aid(), reveal: answered, showMine: revealShown.mine, showCorrect: revealShown.correct });
+      const conv = drawPlacement(c, shot, p, { marks: marks(), reveal: answered, ...shownSets() });
       toTable = conv.toTable;
       const next = aimFor(shot, placement + 0.01);
       if (next) pxPerRad = (conv.toCanvas(next.ghost)[0] - conv.toCanvas(p.ghost)[0]) / 0.01;
     } else if (stage === 2) {
       table.renderStanding(c, (eye, lw) =>
-        buildPlacementMarkings(shot, p, { contactAid: aid(), reveal: answered, aimLine: true, ...shownSets() }, lw, eye),
+        buildPlacementMarkings(shot, p, { marks: marks(), reveal: answered, ...shownSets() }, lw, eye),
       );
       calibrate(c);
     } else {
       // After locking in, Close-up magnifies this same view rather than adding a second one.
       const closeUpLayers = { ghost: false, contact: false, lines: false, closeUp: answered && revealShown.closeUp };
       table.renderAim(c, p, closeUpLayers, (eye, lw) =>
-        buildPlacementMarkings(shot, p, { contactAid: false, reveal: answered, aimLine: false, ...shownSets() }, lw, eye),
+        buildPlacementMarkings(shot, p, { marks: marks(), reveal: answered, ...shownSets() }, lw, eye),
       );
       calibrate(c);
     }
@@ -157,10 +182,58 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
       .join('');
 
   const aidText = () => {
-    if (stage === 3) return STAGES[3].aid;
-    return aid()
-      ? `<strong>Help on:</strong> ${STAGES[stage].aid} It fades once your last 10 average under ${AID_OFF_BELOW}°.`
-      : '<strong>Help off.</strong> It comes back if your last 10 average over 3°.';
+    const showing = helpShowing()
+      ? '<strong>Help showing:</strong> this placement counts as aided.'
+      : '<strong>No help showing:</strong> this placement counts toward passing the stage.';
+    if (stage === 3) return `${showing} ${STAGES[3].aid}`;
+    const auto = progress[stage].aid
+      ? `Automatic help (${STAGES[stage].aid.toLowerCase().replace(/\.$/, '')}) fades once your last 10 average under ${AID_OFF_BELOW}°.`
+      : 'Automatic help has faded; it returns if your last 10 average over 3°.';
+    return `${showing} ${auto}`;
+  };
+
+  const MARK_LABELS: Record<keyof PlacingMarks, { label: string; help: boolean }> = {
+    pocketLine: { label: 'Pocket line', help: true },
+    contact: { label: 'Contact point', help: true },
+    aimLine: { label: 'Aim line', help: false },
+    ghost: { label: 'Ghost ball', help: false },
+  };
+  const markToggles = () => {
+    const shown = marks();
+    const allAuto = (Object.keys(markSettings) as (keyof PlacingMarks)[]).every((k) => markSettings[k] === 'auto');
+    return `<span>Show</span>${(Object.keys(MARK_LABELS) as (keyof PlacingMarks)[])
+      .map((k) => {
+        const { label, help } = MARK_LABELS[k];
+        const tag = [help ? 'help' : '', markSettings[k] === 'auto' ? 'auto' : ''].filter(Boolean).join(' · ');
+        return `<button data-mark="${k}" aria-pressed="${shown[k]}">${label}${tag ? ` <small>${tag}</small>` : ''}</button>`;
+      })
+      .join('')}${allAuto ? '' : '<button class="link" data-marks-auto>Back to auto</button>'}`;
+  };
+
+  /** Re-draw everything that depends on the marking settings. */
+  const refreshMarks = () => {
+    const row = app.querySelector<HTMLElement>('.mark-toggles');
+    if (row) {
+      row.innerHTML = markToggles();
+      bindMarkToggles(row);
+    }
+    app.querySelector('.aid')!.innerHTML = aidText();
+    redraw();
+  };
+  const bindMarkToggles = (root: ParentNode) => {
+    root.querySelectorAll<HTMLButtonElement>('[data-mark]').forEach((b) =>
+      b.addEventListener('click', () => {
+        const k = b.dataset.mark as keyof PlacingMarks;
+        markSettings = { ...markSettings, [k]: marks()[k] ? 'off' : 'on' };
+        saveMarkSettings(markSettings);
+        refreshMarks();
+      }),
+    );
+    root.querySelector('[data-marks-auto]')?.addEventListener('click', () => {
+      markSettings = { ...AUTO_MARKS };
+      saveMarkSettings(markSettings);
+      refreshMarks();
+    });
   };
 
   const averageText = () => {
@@ -216,6 +289,7 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
             : 'Drag the white ghost ball round the object ball until it would send the object ball into the ringed pocket.'
         }</p>
         <p class="aid">${aidText()}</p>
+        <div class="mark-toggles overlay-toggles" role="group" aria-label="Show while placing"${answered ? ' hidden' : ''}>${markToggles()}</div>
         <p class="rotate-hint">Turn your phone sideways for a bigger view.</p>
         <div class="reveal" hidden></div>
       </section>
@@ -231,6 +305,7 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
     screen.querySelector('[data-home]')!.addEventListener('click', () => leave(ctx));
     bindFullscreen(screen);
     bindStageTabs(screen);
+    bindMarkToggles(screen);
     screen.querySelectorAll<HTMLButtonElement>('[data-nudge]').forEach((b) =>
       b.addEventListener('click', () => nudge(Number(b.dataset.nudge))),
     );
@@ -283,7 +358,7 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
     revealShown.correct = true;
     revealShown.closeUp = false;
     const assessment = assess(shot, placement);
-    const r = recordPlacement(progress[stage], assessment.errorDeg);
+    const r = recordPlacement(progress[stage], assessment.errorDeg, helpShowing());
     progress = { ...progress, [stage]: r.progress };
     saveTrainer(progress);
     answer = { placement, stage, assessment, change: r.change };
@@ -327,8 +402,9 @@ export function showTrainer(ctx: LearnContext, stage: Stage = currentStage()) {
         ${change ? `<p class="announce">${announce[change]}</p>` : ''}
       </div>`),
     );
-    // The control bar's middle button becomes Next shot.
+    // The control bar's middle button becomes Next shot; the placing toggles make way for the result's.
     app.querySelector<HTMLButtonElement>('.lock')!.textContent = 'Next shot';
+    app.querySelector<HTMLElement>('.mark-toggles')!.hidden = true;
     app.querySelector('.avg')!.textContent = averageText();
     app.querySelector('.aid')!.innerHTML = aidText();
     app.querySelector('.stage-tabs')!.innerHTML = stageTabs();
